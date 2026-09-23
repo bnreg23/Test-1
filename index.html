@@ -419,10 +419,42 @@ async function initClaude(){
 }
 const canImages = () => !!(S.limits && S.limits.images);
 const maxImages = () => (S.limits && S.limits.images && S.limits.images.maxCount) || 1;
+const IMG_TYPES = ["image/png","image/jpeg","image/webp","image/gif","image/bmp"];
+
+/* ---------- on-device OCR, used when this view can't send images to Claude ---------- */
+let ocrP = null, ocrStatus = null;
+function loadScript(src){
+  return new Promise((res, rej) => { const s = document.createElement("script"); s.src = src; s.onload = res; s.onerror = () => rej(new Error("load " + src)); document.head.append(s); });
+}
+function getOcr(){
+  if (!ocrP){
+    const base = new URL("ocr/", location.href).href;
+    ocrP = (window.Tesseract ? Promise.resolve() : loadScript(base + "tesseract.min.js"))
+      .then(() => window.Tesseract.createWorker("eng", 1, {
+        workerPath: base + "worker-wrap.js", corePath: base + "core", langPath: base + "lang",
+        workerBlobURL: false, cacheMethod: "none", gzip: true,
+        logger: m => { if (ocrStatus) ocrStatus(m); }
+      }))
+      .catch(e => { ocrP = null; throw e; });
+  }
+  return ocrP;
+}
+async function ocrImages(files, onMsg){
+  ocrStatus = m => {
+    if (m.status === "recognizing text") onMsg(`Pulling text from the screenshot… ${Math.round((m.progress || 0) * 100)}%`);
+    else if (m.status) onMsg("Getting the text reader ready…");
+  };
+  onMsg("Getting the text reader ready…");
+  const w = await getOcr();
+  const out = [];
+  for (const f of files){ const { data } = await w.recognize(f); out.push(data.text || ""); }
+  ocrStatus = null;
+  return out.join("\n\n").trim();
+}
 
 /* ---------- prompts ---------- */
-function extractPrompt(pasted, imgCount){
-  return `You are reading LSAT question material for a student's private study log. ${imgCount ? `You have ${imgCount} screenshot(s), likely from 7Sage or an LSAC practice test.` : ""}${pasted ? `\n\nText the student pasted:\n"""\n${pasted.slice(0, 20000)}\n"""` : ""}
+function extractPrompt(pasted, imgCount, ocrText){
+  return `You are reading LSAT question material for a student's private study log. ${imgCount ? `You have ${imgCount} screenshot(s), likely from 7Sage or an LSAC practice test.` : ""}${pasted ? `\n\nText the student pasted:\n"""\n${pasted.slice(0, 20000)}\n"""` : ""}${ocrText ? `\n\nText pulled from the student's screenshot(s) by OCR, likely from 7Sage. It may contain small recognition errors and stray interface text (menus, buttons, timers, navigation); ignore that text and fix obvious OCR mistakes. Answer-choice letters are often garbled (e.g. "(ce)", "[-]", "(®)"); the five choices always appear in order A through E. OCR cannot see colors or highlights, so leave yourAnswer and correctAnswer blank unless the text explicitly states them:\n"""\n${ocrText.slice(0, 30000)}\n"""` : ""}
 
 Extract exactly ONE question. Reply with only this JSON object:
 {"found": true,
@@ -501,7 +533,8 @@ async function readQuestions(){
   let jobs = [];
   if (files.length && S.groupMode === "each") jobs = files.map((f, n) => ({ imgs:[f.file], text: n === 0 ? text : "", label: f.file.name || `Screenshot ${n+1}` }));
   else jobs = [{ imgs: files.map(f => f.file), text, label: files.length ? `${files.length} screenshot${files.length > 1 ? "s" : ""}` : "Pasted text" }];
-  const tooMany = jobs.find(j => j.imgs.length > maxImages());
+  const vision = canImages();
+  const tooMany = vision && jobs.find(j => j.imgs.length > maxImages());
   if (tooMany){ toast(`One question can use up to ${maxImages()} screenshots.`); return; }
   S.picked.forEach(p => URL.revokeObjectURL(p.url));
   S.picked = []; S.pasteText = "";
@@ -511,8 +544,16 @@ async function readQuestions(){
   for (const entry of q){
     try {
       const opts = { modelTier:"default" };
-      if (entry.job.imgs.length) opts.images = entry.job.imgs;
-      const r = await S.sample.json(extractPrompt(entry.job.text, entry.job.imgs.length), opts);
+      let ocrText = "";
+      if (entry.job.imgs.length && vision) opts.images = entry.job.imgs;
+      else if (entry.job.imgs.length){
+        const setMsg = msg => { entry.msg = msg; const el = document.getElementById("qm-" + entry.qid); if (el) el.textContent = msg; };
+        try { ocrText = await ocrImages(entry.job.imgs, setMsg); }
+        catch { throw { code:"_ocr" }; }
+        if (ocrText.length < 40) throw { code:"_notfound" };
+        setMsg("Organizing the question…");
+      }
+      const r = await S.sample.json(extractPrompt(entry.job.text, opts.images ? entry.job.imgs.length : 0, ocrText), opts);
       if (!r || r.found === false || !(r.stem || r.stimulus || r.passage)) throw { code:"_notfound" };
       const choices = {};
       LETTERS.forEach(k => choices[k] = String(r.choices?.[k] ?? "").trim());
@@ -529,7 +570,9 @@ async function readQuestions(){
       S.queue = S.queue.filter(x => x.qid !== entry.qid);
     } catch (e){
       entry.state = "error";
-      entry.error = e && e.code === "_notfound" ? "No LSAT question found in this. Try a clearer screenshot that shows the whole question." : errCopy(e);
+      entry.error = e && e.code === "_notfound" ? "No LSAT question found in this. Try a clearer screenshot that shows the whole question."
+        : e && e.code === "_ocr" ? "Couldn't pull text from this screenshot. Try again, or paste the question text instead."
+        : errCopy(e);
     }
     render(true);
   }
@@ -661,32 +704,32 @@ function viewReview(){
   const imgOK = canImages();
   const d = drafts(), r = reviewed();
   const thumbs = S.picked.map((p, n) => `<div class="thumb"><img src="${p.url}" alt="Screenshot ${n+1}"><button data-unpick="${n}" aria-label="Remove screenshot ${n+1}">×</button></div>`).join("");
-  const accept = (S.limits?.images?.mediaTypes || ["image/png","image/jpeg","image/webp","image/gif"]).join(",");
+  const accept = (imgOK ? S.limits.images.mediaTypes : IMG_TYPES).join(",");
   return `
   <section class="section">
     <h2>Review a question you missed</h2>
     <p class="lede">Screenshot the question in 7Sage (or any practice test) after you finish. Include the stimulus, the question, all five answers, and your marked answer. Flaw Finder reads it, asks how you were thinking, and shows where your reasoning went wrong.</p>
     <div class="card stack">
-      ${imgOK || !S.ready ? `
       <label class="drop" id="drop" for="file">
         <strong>Drop screenshots here, paste them, or choose files</strong>
         <span class="muted">You can add a whole test's worth of misses at once.</span>
         <input type="file" id="file" accept="${esc(accept)}" multiple hidden>
-      </label>` : `<p class="muted">Screenshots aren't available in this view, so paste the question text below.</p>`}
+      </label>
+      ${S.ready && !imgOK ? `<p class="muted" style="font-size:13.5px">Text is pulled from your screenshots right on this device, then the tutor organizes it. You'll mark your answer and the correct one in the next step.</p>` : ""}
       ${S.picked.length ? `<div class="thumbs">${thumbs}</div>` : ""}
       ${S.picked.length > 1 ? `<div class="row"><span class="muted">These screenshots are</span>
         <div class="seg" role="radiogroup">
           <label><input type="radio" name="gm" value="each" ${S.groupMode === "each" ? "checked" : ""}>One question each</label>
           <label><input type="radio" name="gm" value="one" ${S.groupMode === "one" ? "checked" : ""}>Parts of one question</label>
         </div></div>` : ""}
-      <details ${S.pasteText || !imgOK && S.ready ? "open" : ""}><summary>Or paste the question text</summary>
+      <details ${S.pasteText ? "open" : ""}><summary>Or paste the question text</summary>
         <textarea id="pastetext" placeholder="Paste the stimulus, question, and answer choices A–E. Add &quot;My answer: C, Correct: B&quot; if you know them.">${esc(S.pasteText)}</textarea>
       </details>
       <div class="row"><button class="btn primary" id="readbtn" ${S.sample ? "" : "disabled"}>Read ${S.picked.length > 1 && S.groupMode === "each" ? S.picked.length + " questions" : "question"}</button></div>
     </div>
   </section>
   ${S.queue.length ? `<section class="section"><h3>Reading</h3><div class="list">${S.queue.map(q => `
-    <div class="queue-row">${q.state === "reading" ? `<span class="spin" aria-hidden="true"></span><span>${esc(q.label)}</span><span class="muted">Reading the question…</span>` :
+    <div class="queue-row">${q.state === "reading" ? `<span class="spin" aria-hidden="true"></span><span>${esc(q.label)}</span><span class="muted" id="qm-${q.qid}">${esc(q.msg || "Reading the question…")}</span>` :
     `<span class="chip bad">Couldn't read</span><span>${esc(q.label)}: ${esc(q.error)}</span><button class="btn ghost" data-dismiss="${q.qid}">Dismiss</button>`}</div>`).join("")}</div></section>` : ""}
   ${d.length ? `<section class="section"><h3>Waiting for your reasoning</h3><p class="lede">Open each one, confirm the answers, and write a sentence about how you thought it through.</p><div class="list">${d.map(itemRow).join("")}</div></section>` : ""}
   <section class="section">
@@ -919,7 +962,7 @@ function render(force){
 
 function openItem(id){ S.openId = id; render(true); window.scrollTo(0, 0); }
 function addFiles(list){
-  const types = S.limits?.images?.mediaTypes || ["image/png","image/jpeg","image/webp","image/gif"];
+  const types = canImages() ? S.limits.images.mediaTypes : IMG_TYPES;
   let skipped = 0;
   for (const f of list){
     if (!types.includes(f.type)){ skipped++; continue; }

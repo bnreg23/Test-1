@@ -300,7 +300,7 @@ const EXAMPLE = {
 const S = {
   tab:"review", openId:null, items:[], picked:[], pasteText:"", groupMode:"each",
   queue:[], sample:null, limits:null, ready:false, storeMode:"loading",
-  filter:"all", edit:{}, busy:{}, planBusy:false, lastKey:""
+  filter:"all", edit:{}, busy:{}, err:{}, shots:{}, planBusy:false, lastKey:""
 };
 const $ = (s, r=document) => r.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -439,6 +439,20 @@ function getOcr(){
   }
   return ocrP;
 }
+// Text recognition misreads small type, so enlarge narrow screenshots and drop color first.
+async function prepForOcr(file){
+  try {
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(2.5, Math.max(1, 2000 / bmp.width));
+    const c = document.createElement("canvas");
+    c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
+    const g = c.getContext("2d");
+    g.imageSmoothingQuality = "high";
+    g.filter = "grayscale(1) contrast(1.15)";
+    g.drawImage(bmp, 0, 0, c.width, c.height);
+    return c;
+  } catch { return file; }
+}
 async function ocrImages(files, onMsg){
   ocrStatus = m => {
     if (m.status === "recognizing text") onMsg(`Pulling text from the screenshot… ${Math.round((m.progress || 0) * 100)}%`);
@@ -447,7 +461,7 @@ async function ocrImages(files, onMsg){
   onMsg("Getting the text reader ready…");
   const w = await getOcr();
   const out = [];
-  for (const f of files){ const { data } = await w.recognize(f); out.push(data.text || ""); }
+  for (const f of files){ const { data } = await w.recognize(await prepForOcr(f)); out.push(data.text || ""); }
   ocrStatus = null;
   return out.join("\n\n").trim();
 }
@@ -462,14 +476,14 @@ Extract exactly ONE question. Reply with only this JSON object:
  "test": "practice test id if visible, like \\"PT 141\\", else \\"\\"",
  "section": "section if visible, like \\"S2\\", else \\"\\"",
  "number": "question number if visible, else \\"\\"",
- "questionType": one of ${JSON.stringify(ALL_TYPES)} or "",
+ "typeLabel": "a question-type label ONLY if the material itself shows one (7Sage sometimes tags questions, e.g. \"Flaw\"), else \"\". Do not classify the question yourself.",
  "passage": "the Reading Comprehension passage text if shown, else \\"\\"",
  "stimulus": "the Logical Reasoning stimulus, verbatim (\\"\\" for RC)",
  "stem": "the question stem, verbatim",
  "choices": {"A": "...", "B": "...", "C": "...", "D": "...", "E": "..."},
  "yourAnswer": "the letter the STUDENT chose, only if the material clearly marks it (e.g. marked as their answer, red, crossed out as incorrect), else \\"\\"",
  "correctAnswer": "the letter marked correct, only if clearly marked (green, check mark, 'correct answer', answer key), else \\"\\""}
-Copy text verbatim; fix only obvious OCR line breaks. Never guess the two answer letters. If there is no LSAT question in the material, reply {"found": false}.`;
+Copy every word exactly as written. Do not paraphrase, summarize, reorder, or fill in missing words. Join lines that were broken mid-sentence. If a word is unreadable, write [?] in its place rather than guessing. Never guess the two answer letters. If there is no LSAT question in the material, reply {"found": false}.`;
 }
 
 function questionBlock(i){
@@ -485,7 +499,17 @@ function analyzePrompt(i){
 3. Break down the stimulus and every answer choice in plain English: short sentences, everyday words, and define any LSAT term you use.
 
 Section: ${i.sectionType || "LR"}
-Question type (student's label, may be blank): ${i.qtype || "(blank)"}
+${i.qtype && !i.qtypeAuto ? `The student labeled this a ${i.qtype} question. If the stem clearly shows a different type, use the correct type and say so in stemPlain.` : `Question type: not confirmed${i.qtype ? ` (a label read from the screenshot says "${i.qtype}", which may be wrong)` : ""}. Decide the type yourself from the exact wording of the question stem.`}
+
+How to tell the type from the stem:
+- Flaw: "vulnerable to criticism", "flawed", "error in reasoning", "questionable technique". You DESCRIBE a mistake the argument makes.
+- Weaken: "most seriously weakens", "calls into question", "undermines", "casts doubt". You ADD new information that hurts the argument.
+- Strengthen: "most strengthens", "most supports the argument". Evaluate: "most useful to know/determine".
+- Necessary Assumption: "assumption required by", "depends on", "relies on". Sufficient Assumption: "conclusion follows logically if ... assumed", "properly drawn if".
+- Must Be True: "must be true", "properly inferred". Most Strongly Supported: "most strongly supported", "most reasonably concluded".
+- Main Conclusion: "main conclusion". Role: "role played by the claim". Method of Reasoning: "proceeds by", "argumentative technique".
+- Parallel Reasoning / Parallel Flaw: "most similar in its reasoning" (Parallel Flaw if it says flawed). Principle: "principle ... helps justify" (Identify) or "conforms to the principle" (Apply).
+- Point at Issue: "disagree about". Point of Agreement: "agree". Resolve/Explain: "resolve the discrepancy", "explain".
 
 ${questionBlock(i)}
 
@@ -493,15 +517,18 @@ Official correct answer: (${i.correctAnswer}). Treat this as correct; never disp
 Student picked: (${i.yourAnswer})
 Student's confidence: ${i.confidence || "not given"}
 Student ran short on time: ${i.timePressure ? "yes" : "no"}
+The question text may have been read from a screenshot, so small errors are possible. Work from the text as given.
 Student's explanation of their thinking: ${reasoning ? `"${reasoning.slice(0, 3000)}"` : "(none given. Infer the most likely reason from their pick, and say in whatHappened that you are inferring.)"}
 
+Keep every text field short: at most 2 sentences each, except whatHappened (at most 4 sentences). "choices" must be a JSON array of exactly five objects.
 Reply with only this JSON object:
 {"questionType": one of ${JSON.stringify(ALL_TYPES)},
  "plain": {"summary": "2-3 plain-English sentences saying what the stimulus (or passage) says",
            "conclusion": "the main conclusion in plain words, or \\"\\" if there is no argument",
            "premises": ["each piece of evidence in plain words"],
            "gap": "the hole, assumption, or key relationship this question hinges on, in plain words"},
- "stemPlain": "what the question asks you to do, in plain English, and what a right answer must do",
+ "stemPlain": "what the question asks you to do, in plain English, and what a right answer must do. Base this on the exact stem wording.",
+ "textIssues": "if the question text looks garbled, cut off, or has [?] words that matter, say what looks wrong in one sentence; else \"\"",
  "process": ["4-7 short steps a strong test-taker follows on THIS question, in order, specific to this question, including a prediction before reading the choices"],
  "choices": [{"letter": "A", "plain": "what this choice says, in plain words", "verdict": "correct" or "wrong", "trap": "short trap name like Too strong / Out of scope / Reversed logic / Half right; \\"\\" for the correct answer", "why": "1-2 sentences"}, ... all five, A through E],
  "diagnosis": {"mistake": one of ${JSON.stringify(MISTAKES)},
@@ -536,7 +563,6 @@ async function readQuestions(){
   const vision = canImages();
   const tooMany = vision && jobs.find(j => j.imgs.length > maxImages());
   if (tooMany){ toast(`One question can use up to ${maxImages()} screenshots.`); return; }
-  S.picked.forEach(p => URL.revokeObjectURL(p.url));
   S.picked = []; S.pasteText = "";
   const q = jobs.map(j => ({ qid: uid(), label: j.label, state:"reading", job:j }));
   S.queue.push(...q);
@@ -561,11 +587,12 @@ async function readQuestions(){
         id: uid(), kind:"miss", status:"draft", createdAt: Date.now(),
         test: String(r.test || "").trim(), section: String(r.section || "").trim(), number: String(r.number || "").trim(),
         sectionType: r.sectionType === "RC" ? "RC" : "LR",
-        qtype: ALL_TYPES.includes(r.questionType) ? r.questionType : "",
+        qtype: ALL_TYPES.includes(r.typeLabel) ? r.typeLabel : "", qtypeAuto: true, fromOcr: !!ocrText,
         passage: String(r.passage || ""), stimulus: String(r.stimulus || ""), stem: String(r.stem || ""), choices,
         yourAnswer: L(r.yourAnswer), correctAnswer: L(r.correctAnswer),
         reasoning:"", confidence:"", timePressure:false, analysis:null, chat:[]
       };
+      S.shots[item.id] = entry.job.imgs.map(f => URL.createObjectURL(f));
       Store.save(item);
       S.queue = S.queue.filter(x => x.qid !== entry.qid);
     } catch (e){
@@ -583,7 +610,9 @@ function readForm(id){
   const v = sel => { const el = $(sel); return el ? el.value : undefined; };
   const set = (k, x) => { if (x !== undefined) e[k] = x; };
   set("test", v("#f-test")); set("section", v("#f-section")); set("number", v("#f-number"));
-  set("qtype", v("#f-qtype")); set("sectionType", v("#f-stype"));
+  const qt = v("#f-qtype");
+  if (qt) { e.qtype = qt; e.qtypeAuto = false; } else if (qt === "" && !e.qtypeAuto) e.qtype = "";
+  set("sectionType", v("#f-stype"));
   set("reasoning", v("#f-reasoning")); set("stem", v("#f-stem")); set("stimulus", v("#f-stim")); set("passage", v("#f-passage"));
   LETTERS.forEach(k => { const x = v("#f-ch-" + k); if (x !== undefined) e.choices[k] = x; });
   const tp = $("#f-time"); if (tp) e.timePressure = tp.checked;
@@ -593,27 +622,52 @@ function readForm(id){
 let ctl = null;
 async function analyze(id){
   const e = readForm(id); if (!e) return;
-  if (!e.yourAnswer || !e.correctAnswer){ toast("Mark your answer and the correct answer first."); return; }
-  if (e.yourAnswer === e.correctAnswer){ toast("Your answer and the correct answer are the same. Fix one of them."); return; }
+  delete S.err[id];
+  if (!e.yourAnswer || !e.correctAnswer){ S.err[id] = `Tap ${!e.yourAnswer && !e.correctAnswer ? "the letter you picked and the correct letter" : !e.yourAnswer ? "the letter you picked" : "the correct letter"} in Step 2 first.`; render(true); return; }
+  if (e.yourAnswer === e.correctAnswer){ S.err[id] = "Your answer and the correct answer are the same letter. Fix one of them in Step 2."; render(true); return; }
   if (!S.sample){ toast("The tutor only works inside Claude. Open this page from claude.ai."); return; }
   Store.save(e);
   S.busy[id] = "analyzing"; render(true);
   ctl = new AbortController();
   try {
-    const a = await S.sample.json(analyzePrompt(e), { modelTier:"complex", signal: ctl.signal, cache:false });
-    if (!a || !a.diagnosis || !Array.isArray(a.choices)) throw { code:"invalid_json" };
+    const raw = await S.sample.json(analyzePrompt(e), { modelTier:"complex", signal: ctl.signal, cache:false });
+    const a = normalizeAnalysis(raw, e);
+    if (!a) throw { code:"_shape" };
     const done = clone(e);
     done.analysis = a;
-    if (!done.qtype && ALL_TYPES.includes(a.questionType)) done.qtype = a.questionType;
+    if ((done.qtypeAuto || !done.qtype) && ALL_TYPES.includes(a.questionType)){ done.qtype = a.questionType; done.qtypeAuto = false; }
     done.status = "reviewed";
     done.reviewedAt = Date.now();
     Store.save(done);
     delete S.edit[id];
   } catch (err){
-    const m = errCopy(err); if (m) toast(m);
+    S.err[id] = err && err.code === "_shape" ? "The tutor's answer was missing pieces. Press Find my flaw to try once more. If it keeps happening, check the question text in Step 1." : errCopy(err);
   } finally {
     delete S.busy[id]; ctl = null; render(true);
   }
+}
+
+// Accept the small shape variations models produce, instead of failing the whole breakdown.
+function normalizeAnalysis(r, item){
+  if (!r || typeof r !== "object") return null;
+  const str = v => (v == null ? "" : String(v)).trim();
+  let ch = r.choices;
+  if (ch && !Array.isArray(ch) && typeof ch === "object") ch = Object.entries(ch).map(([k, v]) => typeof v === "object" ? { letter:k, ...v } : { letter:k, plain:str(v) });
+  ch = Array.isArray(ch) ? ch.map(c => ({ letter: L(c.letter), plain: str(c.plain || c.meaning || c.summary), verdict: str(c.verdict).toLowerCase().startsWith("c") ? "correct" : "wrong", trap: str(c.trap), why: str(c.why || c.explanation) })).filter(c => c.letter) : [];
+  const d = r.diagnosis && typeof r.diagnosis === "object" ? r.diagnosis : {};
+  const p = r.plain && typeof r.plain === "object" ? r.plain : {};
+  const out = {
+    questionType: str(r.questionType),
+    plain: { summary: str(p.summary), conclusion: str(p.conclusion), premises: Array.isArray(p.premises) ? p.premises.map(str).filter(Boolean) : (p.premises ? [str(p.premises)] : []), gap: str(p.gap) },
+    stemPlain: str(r.stemPlain),
+    textIssues: str(r.textIssues),
+    process: Array.isArray(r.process) ? r.process.map(str).filter(Boolean) : [],
+    choices: ch,
+    diagnosis: { mistake: MISTAKES.includes(str(d.mistake)) ? str(d.mistake) : (str(d.mistake) || "Other"), whatHappened: str(d.whatHappened), whyTempting: str(d.whyTempting), fix: str(d.fix) },
+    takeaway: str(r.takeaway)
+  };
+  if (!out.diagnosis.whatHappened && !ch.length && !out.process.length) return null;
+  return out;
 }
 
 async function sendChat(id, text){
@@ -805,6 +859,8 @@ function viewEditor(i){
   if (!S.edit[i.id]) S.edit[i.id] = clone(i);
   const e = S.edit[i.id];
   const busy = S.busy[i.id] === "analyzing";
+  const shots = S.shots[i.id] || [];
+  const unclear = [e.passage, e.stimulus, e.stem, ...LETTERS.map(k => e.choices?.[k])].some(t => String(t || "").includes("[?]"));
   const opts = (list, v) => list.map(t => `<option ${t === v ? "selected" : ""}>${esc(t)}</option>`).join("");
   const pickRow = (cls, key, label) => `<span class="field"><span>${label}</span></span><div class="bubs ${cls}">${LETTERS.map(k => `<button class="bub" data-pick="${key}" data-letter="${k}" aria-pressed="${e[key] === k}" aria-label="${label} ${k}">${k}</button>`).join("")}</div>`;
   return `
@@ -818,11 +874,14 @@ function viewEditor(i){
     </div>
     <div class="grid2">
       <label class="field"><span>Section type</span><select id="f-stype"><option value="LR" ${e.sectionType !== "RC" ? "selected" : ""}>Logical Reasoning</option><option value="RC" ${e.sectionType === "RC" ? "selected" : ""}>Reading Comprehension</option></select></label>
-      <label class="field" style="grid-column:span 2"><span>Question type</span><select id="f-qtype"><option value="">Let the tutor decide</option><optgroup label="Logical Reasoning">${opts(LR_TYPES, e.qtype)}</optgroup><optgroup label="Reading Comprehension">${opts(RC_TYPES, e.qtype)}</optgroup></select></label>
+      <label class="field" style="grid-column:span 2"><span>Question type</span><select id="f-qtype"><option value="">Let the tutor decide from the question</option><optgroup label="Logical Reasoning">${opts(LR_TYPES, e.qtypeAuto ? "" : e.qtype)}</optgroup><optgroup label="Reading Comprehension">${opts(RC_TYPES, e.qtypeAuto ? "" : e.qtype)}</optgroup></select></label>
     </div>
+    ${shots.length || e.fromOcr ? `<p class="lede">Check that the text below matches your screenshot${e.fromOcr ? ". It was read from the image, so a word can come out wrong" : ""}. If anything's off, open <strong>Fix the text</strong>.</p>` : ""}
+    ${unclear ? `<div class="notice">Some words couldn't be read (marked [?]). Fix them under Fix the text so the tutor reads the question correctly.</div>` : ""}
+    ${shots.length ? `<details class="card" open><summary>Your screenshot${shots.length > 1 ? "s" : ""}</summary><div class="stack">${shots.map((u, n) => `<img src="${u}" alt="Screenshot ${n+1}" style="border-radius:8px;border:1px solid var(--line)">`).join("")}</div></details>` : ""}
     <div class="box">
       ${questionView(e)}
-      <details><summary>Fix the text</summary>
+      <details ${unclear ? "open" : ""}><summary>Fix the text</summary>
         <div class="stack">
           ${e.sectionType === "RC" || e.passage ? `<label class="field"><span>Passage</span><textarea id="f-passage">${esc(e.passage)}</textarea></label>` : ""}
           <label class="field"><span>Stimulus</span><textarea id="f-stim">${esc(e.stimulus)}</textarea></label>
@@ -853,6 +912,7 @@ function viewEditor(i){
       <span style="flex:1"></span>
       <button class="btn ghost danger" data-del="${esc(i.id)}">Delete</button>
     </div>
+    ${S.err[i.id] && !busy ? `<div class="notice" role="alert">${esc(S.err[i.id])}</div>` : ""}
   </section>`;
 }
 
@@ -890,6 +950,7 @@ function viewBreakdown(i){
         ${p.gap ? `<dt>The key issue</dt><dd>${esc(p.gap)}</dd>` : ""}
         <dt>What the question wants</dt><dd>${esc(a.stemPlain)}</dd>
       </dl>
+      ${a.textIssues ? `<div class="notice">The question text may have been read wrong: ${esc(a.textIssues)} Use <strong>Edit and re-run</strong> below to fix it.</div>` : ""}
       <details><summary>Show the original question</summary>${questionView(i)}</details>
     </div>
   </section>
@@ -945,7 +1006,7 @@ function render(force){
   const open = S.openId ? find(S.openId) : null;
   if (S.openId && !open && S.openId !== "example") S.openId = null;
   let key;
-  if (open) key = `d|${open.id}|${open.status}|${!!open.analysis}|${S.busy[open.id] || ""}|${S.ready}|${S.storeMode}`;
+  if (open) key = `d|${open.id}|${open.status}|${!!open.analysis}|${S.busy[open.id] || ""}|${S.err[open.id] || ""}|${S.ready}|${S.storeMode}`;
   else key = `t|${S.tab}|${S.ready}|${S.storeMode}|${S.filter}|${S.planBusy}|` + JSON.stringify(S.items.map(i => [i.id, i.status, i.qtype, i.updatedAt])) + JSON.stringify(S.queue.map(q => q.state));
   document.querySelectorAll(".tab").forEach(t => t.setAttribute("aria-selected", String(!open && t.dataset.tab === S.tab)));
   $("#n-misses").textContent = misses().length;
@@ -988,6 +1049,7 @@ document.addEventListener("click", ev => {
   if (t.dataset.pick){
     const e = S.edit[S.openId]; if (!e) return;
     e[t.dataset.pick] = t.dataset.letter;
+    if (S.err[S.openId]){ delete S.err[S.openId]; const n = document.querySelector('.notice[role="alert"]'); if (n) n.remove(); }
     t.parentElement.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b === t)));
     return;
   }

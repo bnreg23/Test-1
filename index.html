@@ -1,0 +1,994 @@
+<title>LSAT Flaw Finder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,600&family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+:root{
+  --ground:#F1F3F6; --surface:#FFFFFF; --sunk:#E8ECF2;
+  --ink:#18202E; --muted:#5A6376; --line:#D9DEE7;
+  --accent:#2F47B8; --accent-ink:#FFFFFF; --accent-soft:#E4E8FA;
+  --hl:#FFE9A3; --hl-ink:#3A2E00;
+  --good:#1C7A4E; --good-soft:#DDF2E7;
+  --bad:#B8392B; --bad-soft:#F8E1DD;
+  --warn:#8A5A00; --warn-soft:#FBEFD2;
+  --serif:"Newsreader",Georgia,"Times New Roman",serif;
+  --sans:"Public Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+  --r:10px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --ground:#10141B; --surface:#181D27; --sunk:#131821;
+    --ink:#E6E9F0; --muted:#9AA3B5; --line:#2A3140;
+    --accent:#8EA2FF; --accent-ink:#0E1430; --accent-soft:#232C52;
+    --hl:#5A4A12; --hl-ink:#FFF3C4;
+    --good:#5BD19A; --good-soft:#173528;
+    --bad:#FF8A7A; --bad-soft:#3B1D19;
+    --warn:#F2C45A; --warn-soft:#3A2D10;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --ground:#10141B; --surface:#181D27; --sunk:#131821;
+  --ink:#E6E9F0; --muted:#9AA3B5; --line:#2A3140;
+  --accent:#8EA2FF; --accent-ink:#0E1430; --accent-soft:#232C52;
+  --hl:#5A4A12; --hl-ink:#FFF3C4;
+  --good:#5BD19A; --good-soft:#173528;
+  --bad:#FF8A7A; --bad-soft:#3B1D19;
+  --warn:#F2C45A; --warn-soft:#3A2D10;
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);font:15px/1.55 var(--sans);}
+.wrap{max-width:880px;margin:0 auto;padding-inline:16px;padding-block:0 64px}
+h1,h2,h3,h4{font-family:var(--serif);font-weight:600;text-wrap:balance;margin:0;line-height:1.2}
+h2{font-size:26px} h3{font-size:19px} h4{font-size:16px}
+p{margin:0}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mono{font-family:var(--mono);font-size:12.5px;letter-spacing:.02em}
+.muted{color:var(--muted)}
+.label{font-size:11.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+
+/* top bar */
+.bar{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--ground);border-bottom:1px solid var(--line)}
+.bar-in{max-width:880px;margin:0 auto;padding:12px 16px 0;display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:8px 20px}
+.brand{display:flex;align-items:baseline;gap:10px;padding-bottom:10px}
+.brand h1{font-size:22px}
+.brand .mono{color:var(--muted)}
+.tabs{display:flex;gap:2px}
+.tab{background:none;border:0;padding:8px 12px 11px;cursor:pointer;color:var(--muted);font-weight:600;border-bottom:3px solid transparent;display:flex;gap:6px;align-items:center}
+.tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+.tab .n{font-family:var(--mono);font-size:11px;background:var(--sunk);border-radius:99px;padding:1px 7px;color:var(--muted)}
+
+.notice{margin-top:16px;padding:12px 14px;border-radius:var(--r);background:var(--warn-soft);color:var(--warn);font-size:14px}
+.stack{display:flex;flex-direction:column;gap:16px}
+.section{margin-top:28px;display:flex;flex-direction:column;gap:12px}
+.lede{color:var(--muted);max-width:62ch}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:8px;border:1px solid var(--line);background:var(--surface);padding:9px 14px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.ghost{background:none;border-color:transparent;color:var(--muted);padding-inline:8px}
+.btn.ghost:hover{color:var(--ink)}
+.btn.danger{color:var(--bad)}
+.btn:disabled{opacity:.5;cursor:not-allowed;filter:none}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+
+/* intake */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:18px}
+.drop{border:2px dashed var(--line);border-radius:var(--r);padding:22px 16px;text-align:center;display:flex;flex-direction:column;gap:6px;align-items:center;cursor:pointer;background:var(--sunk)}
+.drop.over{border-color:var(--accent);background:var(--accent-soft)}
+.drop strong{font-size:16px}
+.thumbs{display:flex;flex-wrap:wrap;gap:8px}
+.thumb{position:relative;width:84px;height:84px;border-radius:8px;overflow:hidden;border:1px solid var(--line);background:var(--sunk)}
+.thumb img{width:100%;height:100%;object-fit:cover;object-position:top}
+.thumb button{position:absolute;top:3px;right:3px;width:22px;height:22px;border-radius:50%;border:0;background:rgba(0,0,0,.65);color:#fff;cursor:pointer;line-height:1;font-size:14px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg label{position:relative;padding:7px 12px;cursor:pointer;font-size:14px}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg label:has(input:checked){background:var(--accent-soft);color:var(--accent);font-weight:600}
+textarea,input[type=text],select{width:100%;border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:9px 11px}
+textarea{resize:vertical;min-height:90px;line-height:1.5}
+details>summary{cursor:pointer;font-weight:600;color:var(--accent)}
+details[open]>summary{margin-bottom:10px}
+
+/* item rows */
+.list{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:var(--r);background:var(--surface);overflow:hidden}
+.item{display:grid;grid-template-columns:auto 1fr auto;gap:4px 14px;padding:14px 16px;border-top:1px solid var(--line);cursor:pointer;background:none;border-left:0;border-right:0;border-bottom:0;text-align:left;width:100%}
+.item:first-child{border-top:0}
+.item:hover{background:var(--sunk)}
+.item .code{grid-row:span 2;align-self:start;min-width:92px}
+.item .t{font-weight:600}
+.item .sub{grid-column:2/4;color:var(--muted);font-size:14px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:2px 9px;border-radius:99px;background:var(--sunk);color:var(--muted);white-space:nowrap}
+.chip.type{background:var(--accent-soft);color:var(--accent)}
+.chip.bad{background:var(--bad-soft);color:var(--bad)}
+.chip.good{background:var(--good-soft);color:var(--good)}
+.chip.warn{background:var(--warn-soft);color:var(--warn)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.filter{border:1px solid var(--line);background:var(--surface);cursor:pointer;font-size:13px;padding:5px 11px}
+.filter[aria-pressed="true"]{background:var(--ink);color:var(--ground);border-color:var(--ink)}
+
+.queue-row{display:flex;align-items:center;gap:12px;padding:12px 16px;border-top:1px solid var(--line)}
+.queue-row:first-child{border-top:0}
+.spin{width:16px;height:16px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--accent);animation:spin .8s linear infinite;flex:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none;border-top-color:var(--accent)}}
+
+/* question detail */
+.crumb{margin-top:18px}
+.qhead{margin-top:10px;display:flex;flex-direction:column;gap:8px}
+.stim{font-family:var(--serif);font-size:17.5px;line-height:1.6;max-width:68ch}
+.stem{font-family:var(--serif);font-weight:600;font-size:17px}
+.choices{display:flex;flex-direction:column;gap:6px}
+.choice{display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:start;padding:10px 12px;border-radius:8px;border:1px solid transparent}
+.choice .txt{font-family:var(--serif);font-size:16.5px;line-height:1.5}
+.bub{width:30px;height:30px;border-radius:50%;border:1.5px solid var(--muted);display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex:none;background:var(--surface);color:var(--ink)}
+.bub.you{background:var(--bad);border-color:var(--bad);color:var(--surface)}
+.bub.right{background:var(--good);border-color:var(--good);color:var(--surface)}
+button.bub{cursor:pointer}
+button.bub:hover{border-color:var(--ink)}
+.pick{display:grid;grid-template-columns:130px 1fr;gap:8px 12px;align-items:center}
+.pick .bubs{display:flex;gap:8px;flex-wrap:wrap}
+.pick-you button[aria-pressed="true"]{background:var(--bad);border-color:var(--bad);color:var(--surface)}
+.pick-right button[aria-pressed="true"]{background:var(--good);border-color:var(--good);color:var(--surface)}
+.grid2{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.field{display:flex;flex-direction:column;gap:5px}
+.field>span{font-size:13px;font-weight:600;color:var(--muted)}
+.conf{display:flex;flex-wrap:wrap;gap:6px}
+.conf button{border:1px solid var(--line);background:var(--surface);border-radius:99px;padding:5px 12px;cursor:pointer;font-size:14px}
+.conf button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.check{display:flex;gap:8px;align-items:center;font-size:14px}
+
+.slip{border-left:4px solid var(--bad);background:var(--surface);border-radius:0 var(--r) var(--r) 0;padding:18px 18px 18px 20px;border-top:1px solid var(--line);border-right:1px solid var(--line);border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:12px}
+.slip .versus{display:flex;flex-wrap:wrap;gap:14px;align-items:center;font-size:14px}
+.slip .versus span{display:inline-flex;gap:8px;align-items:center}
+.kv{display:grid;grid-template-columns:150px 1fr;gap:10px 16px}
+.kv dt{font-weight:700;font-size:13.5px;color:var(--muted);padding-top:2px}
+.kv dd{margin:0}
+.conclusion{background:var(--hl);color:var(--hl-ink);padding:1px 4px;border-radius:3px;box-decoration-break:clone;-webkit-box-decoration-break:clone}
+.steps{margin:0;padding-left:0;list-style:none;counter-reset:s;display:flex;flex-direction:column;gap:10px}
+.steps li{counter-increment:s;display:grid;grid-template-columns:28px 1fr;gap:10px}
+.steps li::before{content:counter(s);width:24px;height:24px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-weight:700;font-size:12.5px;display:flex;align-items:center;justify-content:center;margin-top:1px}
+.ac{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;padding:14px 0;border-top:1px solid var(--line)}
+.ac:first-child{border-top:0;padding-top:0}
+.ac .orig{font-family:var(--serif);color:var(--muted);font-size:15px}
+.ac .plain{font-weight:600}
+.takeaway{font-family:var(--serif);font-size:20px;line-height:1.4;padding:18px 20px;border-radius:var(--r);background:var(--accent-soft);color:var(--ink)}
+.box{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:18px;display:flex;flex-direction:column;gap:12px}
+.passage{max-height:320px;overflow:auto;padding:12px;background:var(--sunk);border-radius:8px}
+
+/* chat */
+.chat{display:flex;flex-direction:column;gap:10px}
+.msg{max-width:92%;padding:10px 14px;border-radius:12px;line-height:1.55}
+.msg.u{align-self:flex-end;background:var(--accent);color:var(--accent-ink);border-bottom-right-radius:4px}
+.msg.a{align-self:flex-start;background:var(--sunk);border-bottom-left-radius:4px}
+.msg.a p+p,.msg.a ul,.msg.a ol,.md p+p,.md ul,.md ol,.md h4{margin-top:8px}
+.msg ul,.msg ol,.md ul,.md ol{padding-left:20px;margin-bottom:0}
+.composer{display:flex;gap:8px;align-items:flex-end}
+.composer textarea{min-height:46px;height:46px}
+.qchips{display:flex;flex-wrap:wrap;gap:6px}
+.qchips button{border:1px solid var(--line);background:var(--surface);border-radius:99px;padding:5px 12px;cursor:pointer;font-size:13.5px}
+.qchips button:hover{border-color:var(--accent);color:var(--accent)}
+
+/* weak spots */
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;display:flex;flex-direction:column;gap:4px}
+.stat b{font-family:var(--serif);font-size:24px;line-height:1.15;font-weight:600}
+.bars{display:flex;flex-direction:column;gap:8px}
+.barrow{display:grid;grid-template-columns:minmax(120px,210px) 1fr 28px;gap:10px;align-items:center;font-size:14px}
+.track{height:12px;background:var(--sunk);border-radius:99px;overflow:hidden}
+.fill{height:100%;background:var(--accent);border-radius:99px}
+.fill.bad{background:var(--bad)}
+.barrow .v{font-variant-numeric:tabular-nums;text-align:right;font-weight:700}
+.example-tag{align-self:flex-start;white-space:normal}
+[hidden]{display:none!important}
+
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--ground);padding:10px 16px;border-radius:8px;font-size:14px;max-width:calc(100% - 32px);z-index:20;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+
+@media (max-width:620px){
+  .grid2,.stats{grid-template-columns:1fr}
+  .kv{grid-template-columns:1fr;gap:2px}
+  .kv dd{margin-bottom:10px}
+  .pick{grid-template-columns:1fr}
+  .barrow{grid-template-columns:1fr 28px}
+  .barrow .track{grid-column:1/3;grid-row:2}
+  .item{grid-template-columns:1fr auto}
+  .item .code{grid-row:auto;grid-column:1/3}
+  .item .sub{grid-column:1/3}
+  h2{font-size:23px}
+}
+</style>
+
+<header class="bar">
+  <div class="bar-in">
+    <div class="brand"><h1>Flaw Finder</h1><span class="mono">LSAT review</span></div>
+    <nav class="tabs" role="tablist">
+      <button class="tab" role="tab" id="tab-review" data-tab="review">Review</button>
+      <button class="tab" role="tab" id="tab-misses" data-tab="misses">My misses <span class="n" id="n-misses">0</span></button>
+      <button class="tab" role="tab" id="tab-weak" data-tab="weak">Weak spots</button>
+    </nav>
+  </div>
+</header>
+<main class="wrap">
+  <div id="banner"></div>
+  <div id="view"></div>
+</main>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+(() => {
+"use strict";
+
+/* ---------- vocab ---------- */
+const LR_TYPES = ["Main Conclusion","Role (Method of Reasoning — part)","Method of Reasoning","Flaw","Parallel Reasoning","Parallel Flaw","Necessary Assumption","Sufficient Assumption","Strengthen","Weaken","Evaluate","Must Be True","Most Strongly Supported","Must Be False","Point at Issue","Point of Agreement","Resolve/Explain","Principle (Identify)","Principle (Apply)"];
+const RC_TYPES = ["RC: Main Point","RC: Primary Purpose","RC: Detail","RC: Inference","RC: Author's Attitude","RC: Function of a Part","RC: Structure","RC: Analogy/Application","RC: Strengthen/Weaken","RC: Comparative Passages"];
+const ALL_TYPES = LR_TYPES.concat(RC_TYPES);
+const MISTAKES = [
+  "Misidentified the conclusion",
+  "Missed the gap in the argument",
+  "Misread what the question asked",
+  "Conditional logic mix-up",
+  "Picked an answer that was too strong",
+  "Fell for out-of-scope information",
+  "Picked something true but irrelevant",
+  "Missed a shift in terms",
+  "Misread a detail in the text",
+  "Eliminated the right answer too fast",
+  "Used outside knowledge or assumptions",
+  "Didn't go back to the passage",
+  "Time pressure or guessing"
+];
+const LETTERS = ["A","B","C","D","E"];
+const CONF = ["Guessed","Unsure","Fairly sure","Certain"];
+
+/* ---------- worked example (original question, not an official LSAT item) ---------- */
+const EXAMPLE = {
+  id:"example", kind:"miss", status:"reviewed", example:true, createdAt:Date.now(),
+  test:"Example", section:"", number:"", sectionType:"LR", qtype:"Flaw",
+  passage:"",
+  stimulus:"Columnist: Last year, towns in our region that installed protected bike lanes saw traffic accidents drop by 15 percent, while towns that did not install them saw no change. So if our town wants fewer traffic accidents, it should install protected bike lanes.",
+  stem:"The reasoning in the columnist's argument is most vulnerable to criticism on the grounds that the argument",
+  choices:{
+    A:"presumes, without providing justification, that bike lanes are the only way to reduce traffic accidents",
+    B:"fails to consider that the towns that installed bike lanes may have differed from the other towns in some further respect that reduced accidents",
+    C:"relies on the testimony of cyclists, who have a personal interest in the outcome",
+    D:"takes for granted that the town's residents want fewer traffic accidents",
+    E:"draws a conclusion about all towns in the region from evidence about a single town"
+  },
+  yourAnswer:"A", correctAnswer:"B", confidence:"Fairly sure", timePressure:false,
+  reasoning:"The columnist says bike lanes are the answer, so they must be assuming nothing else would work.",
+  analysis:{
+    questionType:"Flaw",
+    plain:{
+      summary:"Some towns added bike lanes and their accidents went down. Towns without bike lanes stayed the same. The columnist says our town should add bike lanes too.",
+      conclusion:"Our town should install bike lanes to get fewer accidents.",
+      premises:["Towns that added bike lanes had 15% fewer accidents.","Towns that didn't add them had no change."],
+      gap:"The argument sees two things happening together (bike lanes and fewer accidents) and assumes one caused the other. Something else about those towns could explain the drop."
+    },
+    stemPlain:"Find the mistake in the argument. The right answer describes a real hole in this specific argument, and it has to be something the argument actually did (or failed to do).",
+    process:[
+      "Find the conclusion: \"our town should install bike lanes.\"",
+      "Find the evidence: towns with bike lanes had fewer accidents.",
+      "Notice the jump. The evidence is a correlation, and the conclusion treats it as a cause.",
+      "Before reading the answers, predict: \"Maybe something else caused the drop.\"",
+      "Match the prediction. (B) says those towns may have differed in another way. That's the correlation-vs-causation hole.",
+      "Check the tempting answers against what the argument actually says. The columnist never claims bike lanes are the only way."
+    ],
+    choices:[
+      {letter:"A",plain:"The argument assumes bike lanes are the ONLY fix.",verdict:"wrong",trap:"Too strong",why:"The columnist says bike lanes would help. They never say nothing else could help. An argument can recommend one fix without ruling out others."},
+      {letter:"B",plain:"The towns with bike lanes might have been different in some other way that caused fewer accidents.",verdict:"correct",trap:"",why:"This names the hole: the argument treats a correlation as proof of cause without ruling out other explanations."},
+      {letter:"C",plain:"The argument relies on biased cyclists.",verdict:"wrong",trap:"Not in the stimulus",why:"No cyclists are quoted. The evidence is accident statistics."},
+      {letter:"D",plain:"The argument assumes people want fewer accidents.",verdict:"wrong",trap:"Harmless assumption",why:"The conclusion is conditional: IF the town wants fewer accidents. So this isn't assumed, and it wouldn't be a flaw anyway."},
+      {letter:"E",plain:"The argument generalizes from one town.",verdict:"wrong",trap:"Describes the wrong argument",why:"The evidence covers many towns, not one."}
+    ],
+    diagnosis:{
+      mistake:"Picked an answer that was too strong",
+      whatHappened:"You read \"should install bike lanes\" as \"bike lanes are the only answer.\" Those are different claims. The columnist recommended one solution; they never ruled out others. So (A) describes an assumption the argument doesn't need.",
+      whyTempting:"(A) sounds like a classic flaw, and the argument does lean hard on bike lanes. It feels close to the problem, but it attacks a claim the columnist didn't make.",
+      fix:"When an answer says \"only,\" \"all,\" or \"never,\" go back and find the exact words in the stimulus that commit the author to that. If you can't point to them, cross it off."
+    },
+    takeaway:"\"X should help\" is not \"X is the only thing that helps.\" Flaw answers must describe what the argument actually did."
+  },
+  chat:[]
+};
+
+/* ---------- state ---------- */
+const S = {
+  tab:"review", openId:null, items:[], picked:[], pasteText:"", groupMode:"each",
+  queue:[], sample:null, limits:null, ready:false, storeMode:"loading",
+  filter:"all", edit:{}, busy:{}, planBusy:false, lastKey:""
+};
+const $ = (s, r=document) => r.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const uid = () => "m" + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+const clone = o => JSON.parse(JSON.stringify(o));
+const misses = () => S.items.filter(i => i.kind === "miss").sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
+const reviewed = () => misses().filter(i => i.status === "reviewed" && i.analysis);
+const drafts = () => misses().filter(i => i.status !== "reviewed");
+const find = id => id === "example" ? EXAMPLE : S.items.find(i => i.id === id);
+const L = v => { const x = String(v || "").trim().toUpperCase().replace(/[^A-E]/g,""); return x.length === 1 ? x : ""; };
+
+let toastT;
+function toast(msg){ const t = $("#toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, 4200); }
+
+function codeFor(i){
+  if (i.example) return "Example";
+  const parts = [i.test, i.section, i.number ? "Q" + String(i.number).replace(/^q/i,"") : ""].filter(Boolean);
+  return parts.length ? parts.join(" · ") : (i.sectionType || "Question");
+}
+function dateFor(ts){ try { return new Date(ts).toLocaleDateString(undefined,{month:"short",day:"numeric"}); } catch { return ""; } }
+
+/* ---------- mini markdown (escaped first) ---------- */
+function md(src){
+  const lines = esc(src).split(/\n/);
+  let html = "", list = null;
+  const inline = s => s.replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>").replace(/(^|[^*])\*(?!\s)(.+?)\*/g,"$1<em>$2</em>");
+  const close = () => { if (list){ html += `</${list}>`; list = null; } };
+  let para = [];
+  const flush = () => { if (para.length){ html += `<p>${inline(para.join("<br>"))}</p>`; para = []; } };
+  for (const raw of lines){
+    const l = raw.trim();
+    let m;
+    if (!l){ flush(); close(); continue; }
+    if ((m = l.match(/^#{1,4}\s+(.*)/))){ flush(); close(); html += `<h4>${inline(m[1])}</h4>`; continue; }
+    if ((m = l.match(/^[-•*]\s+(.*)/))){ flush(); if (list !== "ul"){ close(); html += "<ul>"; list = "ul"; } html += `<li>${inline(m[1])}</li>`; continue; }
+    if ((m = l.match(/^\d+[.)]\s+(.*)/))){ flush(); if (list !== "ol"){ close(); html += "<ol>"; list = "ol"; } html += `<li>${inline(m[1])}</li>`; continue; }
+    close(); para.push(l);
+  }
+  flush(); close();
+  return html;
+}
+
+/* ---------- storage ---------- */
+const LS_KEY = "flawfinder.items.v1";
+const Store = {
+  col:null, chains:{},
+  async init(){
+    const c = window.claude;
+    if (!c || typeof c.use !== "function"){ this.local(); return; }
+    const [db, user] = await Promise.all([c.use("db").catch(() => null), c.use("user").catch(() => null)]);
+    let id = null;
+    if (user){ try { id = await user.id(); } catch {} }
+    if (db && id){
+      try {
+        this.col = db.collection("data/users/" + id);
+        S.storeMode = "db";
+        this.col.onSnapshot(snap => { S.items = snap.docs.map(d => d.data()); render(); },
+          () => { S.storeMode = "local-fallback"; this.local(); });
+        return;
+      } catch {}
+    }
+    this.local();
+  },
+  local(){
+    if (S.storeMode !== "local-fallback") S.storeMode = "local";
+    try { S.items = JSON.parse(localStorage.getItem(LS_KEY) || "[]"); } catch { S.items = []; }
+    render(true);
+  },
+  persistLocal(){ try { localStorage.setItem(LS_KEY, JSON.stringify(S.items)); } catch {} },
+  save(item){
+    item = clone(item);
+    item.updatedAt = Date.now();
+    const i = S.items.findIndex(x => x.id === item.id);
+    if (i >= 0) S.items[i] = item; else S.items.push(item);
+    if (this.col){
+      const ref = this.col.doc(item.id);
+      this.chains[item.id] = (this.chains[item.id] || Promise.resolve())
+        .then(() => ref.set(item))
+        .catch(e => toast(e && e.code === "quota_exceeded" ? "Storage is full. Delete some old misses to save new ones." : "Couldn't save that change. Check your connection and try again."));
+    } else this.persistLocal();
+    return item;
+  },
+  remove(id){
+    S.items = S.items.filter(x => x.id !== id);
+    if (this.col){
+      const ref = this.col.doc(id);
+      this.chains[id] = (this.chains[id] || Promise.resolve()).then(() => ref.delete()).catch(() => toast("Couldn't delete that. Try again."));
+    } else this.persistLocal();
+  }
+};
+
+/* ---------- Claude ---------- */
+function errCopy(e){
+  switch (e && e.code){
+    case "not_granted": case "sampling_disabled": case "not_declared": case "capability_disabled":
+      return "The tutor needs permission to use Claude. Reload the page and choose Allow.";
+    case "rate_limited": return "You've hit a usage limit. Wait a bit, then try again.";
+    case "session_expired": return "Your Claude session expired. Sign in again, then retry.";
+    case "image_rejected": return "That image couldn't be read. Try a PNG or JPG screenshot.";
+    case "images_unavailable": return "This view can't send images. Paste the question text instead.";
+    case "prompt_too_large": return "That's too much text at once. Try one question at a time.";
+    case "invalid_json": return "The tutor's answer came back garbled. Press the button again.";
+    case "refused": return "Claude declined that request. Try rephrasing.";
+    case "cancelled": return "";
+    default: return "Something went wrong reaching Claude. Try again in a moment.";
+  }
+}
+async function initClaude(){
+  const c = window.claude;
+  if (c && typeof c.use === "function"){
+    try { S.sample = await c.use("sample"); } catch { S.sample = null; }
+    if (S.sample){ try { S.limits = await S.sample.limits(); } catch { S.limits = null; } }
+  }
+  S.ready = true;
+  render(true);
+}
+const canImages = () => !!(S.limits && S.limits.images);
+const maxImages = () => (S.limits && S.limits.images && S.limits.images.maxCount) || 1;
+
+/* ---------- prompts ---------- */
+function extractPrompt(pasted, imgCount){
+  return `You are reading LSAT question material for a student's private study log. ${imgCount ? `You have ${imgCount} screenshot(s), likely from 7Sage or an LSAC practice test.` : ""}${pasted ? `\n\nText the student pasted:\n"""\n${pasted.slice(0, 20000)}\n"""` : ""}
+
+Extract exactly ONE question. Reply with only this JSON object:
+{"found": true,
+ "sectionType": "LR" or "RC",
+ "test": "practice test id if visible, like \\"PT 141\\", else \\"\\"",
+ "section": "section if visible, like \\"S2\\", else \\"\\"",
+ "number": "question number if visible, else \\"\\"",
+ "questionType": one of ${JSON.stringify(ALL_TYPES)} or "",
+ "passage": "the Reading Comprehension passage text if shown, else \\"\\"",
+ "stimulus": "the Logical Reasoning stimulus, verbatim (\\"\\" for RC)",
+ "stem": "the question stem, verbatim",
+ "choices": {"A": "...", "B": "...", "C": "...", "D": "...", "E": "..."},
+ "yourAnswer": "the letter the STUDENT chose, only if the material clearly marks it (e.g. marked as their answer, red, crossed out as incorrect), else \\"\\"",
+ "correctAnswer": "the letter marked correct, only if clearly marked (green, check mark, 'correct answer', answer key), else \\"\\""}
+Copy text verbatim; fix only obvious OCR line breaks. Never guess the two answer letters. If there is no LSAT question in the material, reply {"found": false}.`;
+}
+
+function questionBlock(i){
+  const ch = LETTERS.map(k => `(${k}) ${i.choices?.[k] || ""}`).join("\n");
+  return `${i.passage ? `Passage:\n${i.passage}\n\n` : ""}${i.stimulus ? `Stimulus:\n${i.stimulus}\n\n` : ""}Question: ${i.stem}\n${ch}`;
+}
+
+function analyzePrompt(i){
+  const reasoning = (i.reasoning || "").trim();
+  return `You are an expert, encouraging LSAT tutor. A student missed the question below. Your jobs:
+1. Find the exact flaw in THE STUDENT'S reasoning, not just the argument's flaw.
+2. Teach the correct thinking process for this question, step by step.
+3. Break down the stimulus and every answer choice in plain English: short sentences, everyday words, and define any LSAT term you use.
+
+Section: ${i.sectionType || "LR"}
+Question type (student's label, may be blank): ${i.qtype || "(blank)"}
+
+${questionBlock(i)}
+
+Official correct answer: (${i.correctAnswer}). Treat this as correct; never dispute it.
+Student picked: (${i.yourAnswer})
+Student's confidence: ${i.confidence || "not given"}
+Student ran short on time: ${i.timePressure ? "yes" : "no"}
+Student's explanation of their thinking: ${reasoning ? `"${reasoning.slice(0, 3000)}"` : "(none given. Infer the most likely reason from their pick, and say in whatHappened that you are inferring.)"}
+
+Reply with only this JSON object:
+{"questionType": one of ${JSON.stringify(ALL_TYPES)},
+ "plain": {"summary": "2-3 plain-English sentences saying what the stimulus (or passage) says",
+           "conclusion": "the main conclusion in plain words, or \\"\\" if there is no argument",
+           "premises": ["each piece of evidence in plain words"],
+           "gap": "the hole, assumption, or key relationship this question hinges on, in plain words"},
+ "stemPlain": "what the question asks you to do, in plain English, and what a right answer must do",
+ "process": ["4-7 short steps a strong test-taker follows on THIS question, in order, specific to this question, including a prediction before reading the choices"],
+ "choices": [{"letter": "A", "plain": "what this choice says, in plain words", "verdict": "correct" or "wrong", "trap": "short trap name like Too strong / Out of scope / Reversed logic / Half right; \\"\\" for the correct answer", "why": "1-2 sentences"}, ... all five, A through E],
+ "diagnosis": {"mistake": one of ${JSON.stringify(MISTAKES)},
+               "whatHappened": "talk to the student as 'you'. Pinpoint the exact step where their reasoning went off track. Quote their words if they gave any.",
+               "whyTempting": "why their pick looked right",
+               "fix": "a concrete check or habit to use next time"},
+ "takeaway": "one memorable sentence to remember"}`;
+}
+
+function chatRules(i){
+  const a = i.analysis || {};
+  return `You are a patient LSAT tutor chatting with a student about one question they missed. Use plain English and short paragraphs. Keep replies under 150 words unless you are writing a practice question. Prefer guiding questions over lectures when the student is trying to understand. If the student asks for a practice question, write an ORIGINAL one (never a real LSAT question) that tests the same skill and trap, with five choices, and do NOT reveal the answer until they reply with their pick.
+
+The question:
+${questionBlock(i)}
+
+Correct answer: (${i.correctAnswer}). Student picked: (${i.yourAnswer}).
+Student's reasoning: ${i.reasoning ? `"${i.reasoning}"` : "(not given)"}
+Your earlier diagnosis: ${a.diagnosis ? `${a.diagnosis.mistake}. ${a.diagnosis.whatHappened} Fix: ${a.diagnosis.fix}` : "(none)"}
+Correct process: ${(a.process || []).join(" | ")}`;
+}
+
+/* ---------- actions ---------- */
+async function readQuestions(){
+  if (!S.sample){ toast("The tutor only works inside Claude. Open this page from claude.ai."); return; }
+  const files = S.picked.slice();
+  const text = S.pasteText.trim();
+  if (!files.length && !text){ toast("Add a screenshot or paste the question text first."); return; }
+  let jobs = [];
+  if (files.length && S.groupMode === "each") jobs = files.map((f, n) => ({ imgs:[f.file], text: n === 0 ? text : "", label: f.file.name || `Screenshot ${n+1}` }));
+  else jobs = [{ imgs: files.map(f => f.file), text, label: files.length ? `${files.length} screenshot${files.length > 1 ? "s" : ""}` : "Pasted text" }];
+  const tooMany = jobs.find(j => j.imgs.length > maxImages());
+  if (tooMany){ toast(`One question can use up to ${maxImages()} screenshots.`); return; }
+  S.picked.forEach(p => URL.revokeObjectURL(p.url));
+  S.picked = []; S.pasteText = "";
+  const q = jobs.map(j => ({ qid: uid(), label: j.label, state:"reading", job:j }));
+  S.queue.push(...q);
+  render(true);
+  for (const entry of q){
+    try {
+      const opts = { modelTier:"default" };
+      if (entry.job.imgs.length) opts.images = entry.job.imgs;
+      const r = await S.sample.json(extractPrompt(entry.job.text, entry.job.imgs.length), opts);
+      if (!r || r.found === false || !(r.stem || r.stimulus || r.passage)) throw { code:"_notfound" };
+      const choices = {};
+      LETTERS.forEach(k => choices[k] = String(r.choices?.[k] ?? "").trim());
+      const item = {
+        id: uid(), kind:"miss", status:"draft", createdAt: Date.now(),
+        test: String(r.test || "").trim(), section: String(r.section || "").trim(), number: String(r.number || "").trim(),
+        sectionType: r.sectionType === "RC" ? "RC" : "LR",
+        qtype: ALL_TYPES.includes(r.questionType) ? r.questionType : "",
+        passage: String(r.passage || ""), stimulus: String(r.stimulus || ""), stem: String(r.stem || ""), choices,
+        yourAnswer: L(r.yourAnswer), correctAnswer: L(r.correctAnswer),
+        reasoning:"", confidence:"", timePressure:false, analysis:null, chat:[]
+      };
+      Store.save(item);
+      S.queue = S.queue.filter(x => x.qid !== entry.qid);
+    } catch (e){
+      entry.state = "error";
+      entry.error = e && e.code === "_notfound" ? "No LSAT question found in this. Try a clearer screenshot that shows the whole question." : errCopy(e);
+    }
+    render(true);
+  }
+}
+
+function readForm(id){
+  const e = S.edit[id]; if (!e) return null;
+  const v = sel => { const el = $(sel); return el ? el.value : undefined; };
+  const set = (k, x) => { if (x !== undefined) e[k] = x; };
+  set("test", v("#f-test")); set("section", v("#f-section")); set("number", v("#f-number"));
+  set("qtype", v("#f-qtype")); set("sectionType", v("#f-stype"));
+  set("reasoning", v("#f-reasoning")); set("stem", v("#f-stem")); set("stimulus", v("#f-stim")); set("passage", v("#f-passage"));
+  LETTERS.forEach(k => { const x = v("#f-ch-" + k); if (x !== undefined) e.choices[k] = x; });
+  const tp = $("#f-time"); if (tp) e.timePressure = tp.checked;
+  return e;
+}
+
+let ctl = null;
+async function analyze(id){
+  const e = readForm(id); if (!e) return;
+  if (!e.yourAnswer || !e.correctAnswer){ toast("Mark your answer and the correct answer first."); return; }
+  if (e.yourAnswer === e.correctAnswer){ toast("Your answer and the correct answer are the same. Fix one of them."); return; }
+  if (!S.sample){ toast("The tutor only works inside Claude. Open this page from claude.ai."); return; }
+  Store.save(e);
+  S.busy[id] = "analyzing"; render(true);
+  ctl = new AbortController();
+  try {
+    const a = await S.sample.json(analyzePrompt(e), { modelTier:"complex", signal: ctl.signal, cache:false });
+    if (!a || !a.diagnosis || !Array.isArray(a.choices)) throw { code:"invalid_json" };
+    const done = clone(e);
+    done.analysis = a;
+    if (!done.qtype && ALL_TYPES.includes(a.questionType)) done.qtype = a.questionType;
+    done.status = "reviewed";
+    done.reviewedAt = Date.now();
+    Store.save(done);
+    delete S.edit[id];
+  } catch (err){
+    const m = errCopy(err); if (m) toast(m);
+  } finally {
+    delete S.busy[id]; ctl = null; render(true);
+  }
+}
+
+async function sendChat(id, text){
+  const item = find(id); if (!item || !text.trim()) return;
+  if (!S.sample){ toast("The tutor only works inside Claude. Open this page from claude.ai."); return; }
+  if (S.busy[id]) return;
+  const chat = (item.chat || []).slice(-24);
+  const turns = [{ role:"user", content: chatRules(item) }, ...chat, { role:"user", content: text.trim() }];
+  const log = $("#chatlog");
+  const u = document.createElement("div"); u.className = "msg u"; u.textContent = text.trim(); log.append(u);
+  const b = document.createElement("div"); b.className = "msg a"; b.innerHTML = `<span class="muted">Thinking…</span>`; log.append(b);
+  const input = $("#chatin"); if (input) input.value = "";
+  S.busy[id] = "chat"; toggleChat(true);
+  ctl = new AbortController();
+  try {
+    const r = await S.sample(turns, { cache:false, signal: ctl.signal, onText: ({ text }) => { b.innerHTML = md(text); } });
+    b.innerHTML = md(r.text);
+    if (!item.example){
+      const next = clone(item);
+      next.chat = chat.concat([{ role:"user", content:text.trim() }, { role:"assistant", content:r.text }]).slice(-30);
+      Store.save(next);
+    } else {
+      EXAMPLE.chat = chat.concat([{ role:"user", content:text.trim() }, { role:"assistant", content:r.text }]);
+    }
+  } catch (err){
+    if (err && err.text) b.innerHTML = md(err.text) + `<p class="muted">(Interrupted)</p>`;
+    else b.remove();
+    const m = errCopy(err); if (m) toast(m);
+  } finally {
+    delete S.busy[id]; ctl = null; toggleChat(false);
+  }
+}
+function toggleChat(busy){
+  const s = $("#chatsend"), st = $("#chatstop");
+  if (s) s.hidden = busy; if (st) st.hidden = !busy;
+  document.querySelectorAll(".qchips button").forEach(x => x.disabled = busy);
+}
+
+async function makePlan(){
+  const list = reviewed();
+  if (!list.length || !S.sample) return;
+  S.planBusy = true; render(true);
+  const rows = list.slice(0, 120).map(i => `- ${i.qtype || i.analysis.questionType} | slip: ${i.analysis.diagnosis?.mistake} | confidence: ${i.confidence || "?"} | lesson: ${i.analysis.takeaway}`).join("\n");
+  const prompt = `You are an LSAT tutor. Here is a student's log of ${list.length} questions they got wrong, with the question type, the reasoning slip, their confidence, and the lesson:
+${rows}
+
+Write a short, specific study plan in plain English using markdown, under 300 words, with exactly these sections:
+## Your patterns
+(2-4 bullets naming the biggest patterns, with counts. Note confident-but-wrong answers; they point to misunderstandings, not carelessness.)
+## Drill this week
+(a numbered list of 3-5 concrete drills: which question types, how many questions, and what to focus on while doing them. 7Sage-style targeted drill sets are fine to reference.)
+## Habits to fix
+(2-3 bullets, each a check to run during the test)`;
+  try {
+    const r = await S.sample(prompt, { modelTier:"default", cache:false });
+    Store.save({ id:"studyplan", kind:"plan", text:r.text, basedOn:list.length, createdAt:Date.now() });
+  } catch (err){
+    const m = errCopy(err); if (m) toast(m);
+  } finally { S.planBusy = false; render(true); }
+}
+
+/* ---------- views ---------- */
+function banner(){
+  if (!S.ready) return "";
+  let out = "";
+  if (!S.sample) out += `<div class="notice">The tutor runs inside Claude. Open this page from claude.ai to read screenshots and get breakdowns. You can still browse the worked example.</div>`;
+  if (S.storeMode === "local" || S.storeMode === "local-fallback") out += `<div class="notice">Your log is being saved in this browser only. It won't sync to your other devices.</div>`;
+  return out;
+}
+
+function itemRow(i){
+  const a = i.analysis;
+  const chips = [];
+  if (i.qtype) chips.push(`<span class="chip type">${esc(i.qtype)}</span>`);
+  if (i.status !== "reviewed") chips.push(`<span class="chip warn">Needs your reasoning</span>`);
+  else if (a?.diagnosis?.mistake) chips.push(`<span class="chip bad">${esc(a.diagnosis.mistake)}</span>`);
+  if (i.example) chips.push(`<span class="chip">Example</span>`);
+  const sub = a?.takeaway || i.stem || i.stimulus || "";
+  return `<button class="item" data-open="${esc(i.id)}">
+    <span class="code mono">${esc(codeFor(i))}</span>
+    <span class="chips">${chips.join("")}</span>
+    <span class="mono muted">${esc(i.example ? "" : dateFor(i.createdAt))}</span>
+    <span class="sub">${esc(sub)}</span>
+  </button>`;
+}
+
+function viewReview(){
+  const imgOK = canImages();
+  const d = drafts(), r = reviewed();
+  const thumbs = S.picked.map((p, n) => `<div class="thumb"><img src="${p.url}" alt="Screenshot ${n+1}"><button data-unpick="${n}" aria-label="Remove screenshot ${n+1}">×</button></div>`).join("");
+  const accept = (S.limits?.images?.mediaTypes || ["image/png","image/jpeg","image/webp","image/gif"]).join(",");
+  return `
+  <section class="section">
+    <h2>Review a question you missed</h2>
+    <p class="lede">Screenshot the question in 7Sage (or any practice test) after you finish. Include the stimulus, the question, all five answers, and your marked answer. Flaw Finder reads it, asks how you were thinking, and shows where your reasoning went wrong.</p>
+    <div class="card stack">
+      ${imgOK || !S.ready ? `
+      <label class="drop" id="drop" for="file">
+        <strong>Drop screenshots here, paste them, or choose files</strong>
+        <span class="muted">You can add a whole test's worth of misses at once.</span>
+        <input type="file" id="file" accept="${esc(accept)}" multiple hidden>
+      </label>` : `<p class="muted">Screenshots aren't available in this view, so paste the question text below.</p>`}
+      ${S.picked.length ? `<div class="thumbs">${thumbs}</div>` : ""}
+      ${S.picked.length > 1 ? `<div class="row"><span class="muted">These screenshots are</span>
+        <div class="seg" role="radiogroup">
+          <label><input type="radio" name="gm" value="each" ${S.groupMode === "each" ? "checked" : ""}>One question each</label>
+          <label><input type="radio" name="gm" value="one" ${S.groupMode === "one" ? "checked" : ""}>Parts of one question</label>
+        </div></div>` : ""}
+      <details ${S.pasteText || !imgOK && S.ready ? "open" : ""}><summary>Or paste the question text</summary>
+        <textarea id="pastetext" placeholder="Paste the stimulus, question, and answer choices A–E. Add &quot;My answer: C, Correct: B&quot; if you know them.">${esc(S.pasteText)}</textarea>
+      </details>
+      <div class="row"><button class="btn primary" id="readbtn" ${S.sample ? "" : "disabled"}>Read ${S.picked.length > 1 && S.groupMode === "each" ? S.picked.length + " questions" : "question"}</button></div>
+    </div>
+  </section>
+  ${S.queue.length ? `<section class="section"><h3>Reading</h3><div class="list">${S.queue.map(q => `
+    <div class="queue-row">${q.state === "reading" ? `<span class="spin" aria-hidden="true"></span><span>${esc(q.label)}</span><span class="muted">Reading the question…</span>` :
+    `<span class="chip bad">Couldn't read</span><span>${esc(q.label)}: ${esc(q.error)}</span><button class="btn ghost" data-dismiss="${q.qid}">Dismiss</button>`}</div>`).join("")}</div></section>` : ""}
+  ${d.length ? `<section class="section"><h3>Waiting for your reasoning</h3><p class="lede">Open each one, confirm the answers, and write a sentence about how you thought it through.</p><div class="list">${d.map(itemRow).join("")}</div></section>` : ""}
+  <section class="section">
+    <h3>${r.length ? "Recently reviewed" : "See how a breakdown looks"}</h3>
+    <div class="list">${(r.length ? r.slice(0, 4) : [EXAMPLE]).map(itemRow).join("")}</div>
+  </section>`;
+}
+
+function viewMisses(){
+  const all = misses();
+  const types = [...new Set(all.map(i => i.qtype).filter(Boolean))].sort();
+  let list = all;
+  if (S.filter === "drafts") list = all.filter(i => i.status !== "reviewed");
+  else if (S.filter !== "all") list = all.filter(i => i.qtype === S.filter);
+  const f = (v, label) => `<button class="chip filter" data-filter="${esc(v)}" aria-pressed="${S.filter === v}">${esc(label)}</button>`;
+  return `<section class="section">
+    <h2>My misses</h2>
+    ${all.length ? `<div class="chips">${f("all","All")}${drafts().length ? f("drafts","Needs reasoning") : ""}${types.map(t => f(t, t)).join("")}</div>
+      <div class="list">${list.map(itemRow).join("") || `<p class="card muted">Nothing matches this filter.</p>`}</div>`
+    : `<p class="lede">Questions you review show up here. Here's a worked example so you can see what you'll get.</p><div class="list">${itemRow(EXAMPLE)}</div>`}
+  </section>`;
+}
+
+function bars(counts, cls){
+  const entries = Object.entries(counts).sort((a,b) => b[1] - a[1]);
+  const max = Math.max(1, ...entries.map(e => e[1]));
+  return `<div class="bars">${entries.map(([k, v]) => `<div class="barrow"><span>${esc(k)}</span><div class="track"><div class="fill ${cls || ""}" style="width:${(v / max * 100).toFixed(1)}%"></div></div><span class="v">${v}</span></div>`).join("")}</div>`;
+}
+function viewWeak(){
+  const list = reviewed();
+  const isEx = !list.length;
+  const data = isEx ? [
+    {qtype:"Necessary Assumption", m:"Missed the gap in the argument", c:"Fairly sure"},{qtype:"Necessary Assumption", m:"Picked an answer that was too strong", c:"Certain"},
+    {qtype:"Flaw", m:"Picked an answer that was too strong", c:"Fairly sure"},{qtype:"Strengthen", m:"Fell for out-of-scope information", c:"Unsure"},
+    {qtype:"Necessary Assumption", m:"Conditional logic mix-up", c:"Guessed"},{qtype:"RC: Inference", m:"Didn't go back to the passage", c:"Fairly sure"},
+    {qtype:"Flaw", m:"Missed the gap in the argument", c:"Unsure"}
+  ] : list.map(i => ({ qtype: i.qtype || i.analysis.questionType || "Unlabeled", m: i.analysis.diagnosis?.mistake || "Other", c: i.confidence, test: i.test }));
+  const byType = {}, byM = {}, byTest = {};
+  data.forEach(d => { byType[d.qtype] = (byType[d.qtype] || 0) + 1; byM[d.m] = (byM[d.m] || 0) + 1; if (d.test) byTest[d.test] = (byTest[d.test] || 0) + 1; });
+  const top = o => Object.entries(o).sort((a,b) => b[1] - a[1])[0] || ["—", 0];
+  const confident = data.filter(d => d.c === "Certain" || d.c === "Fairly sure").length;
+  const plan = S.items.find(i => i.id === "studyplan");
+  return `<section class="section">
+    <h2>Weak spots</h2>
+    ${isEx ? `<span class="chip warn example-tag">Example data. Your own chart appears after your first reviewed miss.</span>` : `<p class="lede">Based on ${list.length} reviewed miss${list.length === 1 ? "" : "es"}.</p>`}
+    <div class="stats">
+      <div class="stat"><span class="label">Most-missed type</span><b>${esc(top(byType)[0])}</b><span class="muted">${top(byType)[1]} misses</span></div>
+      <div class="stat"><span class="label">Most common slip</span><b>${esc(top(byM)[0])}</b><span class="muted">${top(byM)[1]} times</span></div>
+      <div class="stat"><span class="label">Confident but wrong</span><b>${confident} of ${data.length}</b><span class="muted">These point to a misunderstanding, not a careless slip.</span></div>
+    </div>
+  </section>
+  <section class="section"><h3>Misses by question type</h3><div class="box">${bars(byType)}</div></section>
+  <section class="section"><h3>Why you missed them</h3><div class="box">${bars(byM, "bad")}</div></section>
+  ${Object.keys(byTest).length > 1 ? `<section class="section"><h3>Misses by test</h3><div class="box">${bars(byTest)}</div></section>` : ""}
+  <section class="section">
+    <h3>Study plan</h3>
+    <div class="box">
+      ${plan ? `<div class="md">${md(plan.text)}</div><p class="muted mono">Written ${esc(dateFor(plan.createdAt))} from ${plan.basedOn} misses</p>` : `<p class="muted">${isEx ? "Review a few misses, then get a plan built from your own patterns." : "Get a plan for this week built from the patterns above."}</p>`}
+      <div class="row"><button class="btn primary" id="planbtn" ${isEx || !S.sample || S.planBusy ? "disabled" : ""}>${S.planBusy ? `<span class="spin"></span> Writing your plan…` : plan ? "Update my plan" : "Write my study plan"}</button></div>
+    </div>
+  </section>`;
+}
+
+function questionView(i, withHL){
+  const hl = s => esc(s);
+  return `${i.passage ? `<details><summary>Passage</summary><div class="passage stim">${hl(i.passage).replace(/\n/g,"<br>")}</div></details>` : ""}
+    ${i.stimulus ? `<p class="stim">${hl(i.stimulus)}</p>` : ""}
+    <p class="stem">${esc(i.stem)}</p>
+    <div class="choices">${LETTERS.map(k => `<div class="choice"><span class="bub ${k === i.correctAnswer ? "right" : k === i.yourAnswer ? "you" : ""}">${k}</span><span class="txt">${esc(i.choices?.[k])}</span></div>`).join("")}</div>`;
+}
+
+function viewEditor(i){
+  if (!S.edit[i.id]) S.edit[i.id] = clone(i);
+  const e = S.edit[i.id];
+  const busy = S.busy[i.id] === "analyzing";
+  const opts = (list, v) => list.map(t => `<option ${t === v ? "selected" : ""}>${esc(t)}</option>`).join("");
+  const pickRow = (cls, key, label) => `<span class="field"><span>${label}</span></span><div class="bubs ${cls}">${LETTERS.map(k => `<button class="bub" data-pick="${key}" data-letter="${k}" aria-pressed="${e[key] === k}" aria-label="${label} ${k}">${k}</button>`).join("")}</div>`;
+  return `
+  <div class="crumb"><button class="btn ghost" data-back>← Back</button></div>
+  <section class="section">
+    <span class="label">Step 1 · Check what was read</span>
+    <div class="grid2">
+      <label class="field"><span>Test</span><input type="text" id="f-test" value="${esc(e.test)}" placeholder="PT 141"></label>
+      <label class="field"><span>Section</span><input type="text" id="f-section" value="${esc(e.section)}" placeholder="S2"></label>
+      <label class="field"><span>Question #</span><input type="text" id="f-number" value="${esc(e.number)}" placeholder="14"></label>
+    </div>
+    <div class="grid2">
+      <label class="field"><span>Section type</span><select id="f-stype"><option value="LR" ${e.sectionType !== "RC" ? "selected" : ""}>Logical Reasoning</option><option value="RC" ${e.sectionType === "RC" ? "selected" : ""}>Reading Comprehension</option></select></label>
+      <label class="field" style="grid-column:span 2"><span>Question type</span><select id="f-qtype"><option value="">Let the tutor decide</option><optgroup label="Logical Reasoning">${opts(LR_TYPES, e.qtype)}</optgroup><optgroup label="Reading Comprehension">${opts(RC_TYPES, e.qtype)}</optgroup></select></label>
+    </div>
+    <div class="box">
+      ${questionView(e)}
+      <details><summary>Fix the text</summary>
+        <div class="stack">
+          ${e.sectionType === "RC" || e.passage ? `<label class="field"><span>Passage</span><textarea id="f-passage">${esc(e.passage)}</textarea></label>` : ""}
+          <label class="field"><span>Stimulus</span><textarea id="f-stim">${esc(e.stimulus)}</textarea></label>
+          <label class="field"><span>Question</span><textarea id="f-stem" style="min-height:60px">${esc(e.stem)}</textarea></label>
+          ${LETTERS.map(k => `<label class="field"><span>(${k})</span><textarea id="f-ch-${k}" style="min-height:52px">${esc(e.choices?.[k])}</textarea></label>`).join("")}
+        </div>
+      </details>
+    </div>
+  </section>
+  <section class="section">
+    <span class="label">Step 2 · Your answer</span>
+    <div class="pick">
+      ${pickRow("pick-you", "yourAnswer", "I picked")}
+      ${pickRow("pick-right", "correctAnswer", "Correct answer")}
+    </div>
+  </section>
+  <section class="section">
+    <span class="label">Step 3 · How you were thinking</span>
+    <p class="lede">This is the one part you have to type, and it's the most useful. The tutor looks for the exact step where your thinking went wrong. A sentence or two is enough.</p>
+    <textarea id="f-reasoning" placeholder="Example: I thought the argument assumed the survey was representative, so I picked C. I crossed off B because it seemed too narrow.">${esc(e.reasoning)}</textarea>
+    <div class="field"><span>How sure were you?</span><div class="conf">${CONF.map(c => `<button data-conf="${c}" aria-pressed="${e.confidence === c}">${c}</button>`).join("")}</div></div>
+    <label class="check"><input type="checkbox" id="f-time" ${e.timePressure ? "checked" : ""}> I was running short on time</label>
+  </section>
+  <section class="section">
+    <div class="row">
+      <button class="btn primary" id="analyzebtn" ${busy || !S.sample ? "disabled" : ""}>${busy ? `<span class="spin"></span> Finding the flaw… (up to a minute)` : "Find my flaw"}</button>
+      ${busy ? `<button class="btn" id="stopbtn">Stop</button>` : `<button class="btn" id="savedraft">Save for later</button>`}
+      <span style="flex:1"></span>
+      <button class="btn ghost danger" data-del="${esc(i.id)}">Delete</button>
+    </div>
+  </section>`;
+}
+
+function viewBreakdown(i){
+  const a = i.analysis, p = a.plain || {}, d = a.diagnosis || {};
+  const ch = LETTERS.map(k => (a.choices || []).find(c => L(c.letter) === k) || { letter:k, plain:"", verdict: k === i.correctAnswer ? "correct" : "wrong", why:"" });
+  const busy = S.busy[i.id] === "analyzing";
+  return `
+  <div class="crumb"><button class="btn ghost" data-back>← Back</button></div>
+  <section class="qhead">
+    <div class="row"><span class="mono muted">${esc(codeFor(i))}</span>${i.qtype ? `<span class="chip type">${esc(i.qtype)}</span>` : ""}${i.example ? `<span class="chip">Example. Not a real LSAT question.</span>` : ""}</div>
+    <h2>${esc(d.mistake || "Breakdown")}</h2>
+  </section>
+
+  <section class="section">
+    <div class="slip">
+      <span class="label">Where your thinking slipped</span>
+      <div class="versus"><span><span class="bub you">${esc(i.yourAnswer)}</span> You picked</span><span><span class="bub right">${esc(i.correctAnswer)}</span> Correct</span>${i.confidence ? `<span class="chip">${esc(i.confidence)}</span>` : ""}${i.timePressure ? `<span class="chip warn">Short on time</span>` : ""}</div>
+      ${i.reasoning ? `<p class="muted"><em>Your reasoning: “${esc(i.reasoning)}”</em></p>` : ""}
+      <p>${esc(d.whatHappened)}</p>
+      <dl class="kv">
+        <dt>Why it was tempting</dt><dd>${esc(d.whyTempting)}</dd>
+        <dt>Next time</dt><dd>${esc(d.fix)}</dd>
+      </dl>
+    </div>
+  </section>
+
+  <section class="section">
+    <h3>The ${i.sectionType === "RC" ? "passage" : "argument"} in plain English</h3>
+    <div class="box">
+      <p>${esc(p.summary)}</p>
+      <dl class="kv">
+        ${p.conclusion ? `<dt>Conclusion</dt><dd><span class="conclusion">${esc(p.conclusion)}</span></dd>` : ""}
+        ${(p.premises || []).length ? `<dt>Evidence</dt><dd><ul style="margin:0;padding-left:18px">${p.premises.map(x => `<li>${esc(x)}</li>`).join("")}</ul></dd>` : ""}
+        ${p.gap ? `<dt>The key issue</dt><dd>${esc(p.gap)}</dd>` : ""}
+        <dt>What the question wants</dt><dd>${esc(a.stemPlain)}</dd>
+      </dl>
+      <details><summary>Show the original question</summary>${questionView(i)}</details>
+    </div>
+  </section>
+
+  <section class="section">
+    <h3>The right way to think it through</h3>
+    <div class="box"><ol class="steps">${(a.process || []).map(s => `<li><span>${esc(s)}</span></li>`).join("")}</ol></div>
+  </section>
+
+  <section class="section">
+    <h3>Every answer choice</h3>
+    <div class="box">${ch.map(c => { const k = L(c.letter); return `<div class="ac">
+      <span class="bub ${k === i.correctAnswer ? "right" : k === i.yourAnswer ? "you" : ""}">${k}</span>
+      <div class="stack" style="gap:6px">
+        <div class="row" style="gap:8px"><span class="plain">${esc(c.plain)}</span>${c.verdict === "correct" ? `<span class="chip good">Correct</span>` : c.trap ? `<span class="chip bad">${esc(c.trap)}</span>` : ""}${k === i.yourAnswer ? `<span class="chip">Your pick</span>` : ""}</div>
+        <span>${esc(c.why)}</span>
+        <span class="orig">${esc(i.choices?.[k])}</span>
+      </div></div>`; }).join("")}</div>
+  </section>
+
+  <section class="section">
+    <span class="label">Remember</span>
+    <p class="takeaway">${esc(a.takeaway)}</p>
+  </section>
+
+  <section class="section">
+    <h3>Ask your tutor</h3>
+    <div class="box">
+      <div class="chat" id="chatlog">${(i.chat || []).map(m => m.role === "user" ? `<div class="msg u">${esc(m.content)}</div>` : `<div class="msg a">${md(m.content)}</div>`).join("") || `<p class="muted">Still fuzzy? Ask anything about this question, or try one of these.</p>`}</div>
+      <div class="qchips">
+        <button data-q="Explain this again more simply, like I'm new to the LSAT.">Explain it more simply</button>
+        <button data-q="Walk me through exactly why my answer is wrong, one step at a time. Ask me questions instead of just telling me.">Coach me through my mistake</button>
+        <button data-q="Write me an original practice question that tests the same skill and has the same kind of trap. Don't tell me the answer until I pick.">Give me a similar question</button>
+        <button data-q="How can I spot this kind of trap faster under time pressure?">How do I spot this faster?</button>
+      </div>
+      <div class="composer">
+        <textarea id="chatin" placeholder="Ask about this question…" ${S.sample ? "" : "disabled"}></textarea>
+        <button class="btn primary" id="chatsend" ${S.sample ? "" : "disabled"}>Send</button>
+        <button class="btn" id="chatstop" hidden>Stop</button>
+      </div>
+    </div>
+  </section>
+
+  ${i.example ? "" : `<section class="section"><div class="row">
+    <button class="btn" data-redo="${esc(i.id)}" ${busy ? "disabled" : ""}>Edit and re-run</button>
+    <span style="flex:1"></span>
+    <button class="btn ghost danger" data-del="${esc(i.id)}">Delete</button>
+  </div></section>`}`;
+}
+
+/* ---------- render ---------- */
+function render(force){
+  const open = S.openId ? find(S.openId) : null;
+  if (S.openId && !open && S.openId !== "example") S.openId = null;
+  let key;
+  if (open) key = `d|${open.id}|${open.status}|${!!open.analysis}|${S.busy[open.id] || ""}|${S.ready}|${S.storeMode}`;
+  else key = `t|${S.tab}|${S.ready}|${S.storeMode}|${S.filter}|${S.planBusy}|` + JSON.stringify(S.items.map(i => [i.id, i.status, i.qtype, i.updatedAt])) + JSON.stringify(S.queue.map(q => q.state));
+  document.querySelectorAll(".tab").forEach(t => t.setAttribute("aria-selected", String(!open && t.dataset.tab === S.tab)));
+  $("#n-misses").textContent = misses().length;
+  $("#banner").innerHTML = banner();
+  if (!force && key === S.lastKey) return;
+  S.lastKey = key;
+  const focusId = document.activeElement && document.activeElement.id;
+  let html;
+  if (open) html = open.status === "reviewed" && open.analysis ? viewBreakdown(open) : viewEditor(open);
+  else html = S.tab === "misses" ? viewMisses() : S.tab === "weak" ? viewWeak() : viewReview();
+  $("#view").innerHTML = html;
+  if (focusId){ const f = document.getElementById(focusId); if (f && f.tagName !== "BUTTON") f.focus(); }
+}
+
+function openItem(id){ S.openId = id; render(true); window.scrollTo(0, 0); }
+function addFiles(list){
+  const types = S.limits?.images?.mediaTypes || ["image/png","image/jpeg","image/webp","image/gif"];
+  let skipped = 0;
+  for (const f of list){
+    if (!types.includes(f.type)){ skipped++; continue; }
+    S.picked.push({ file:f, url:URL.createObjectURL(f) });
+  }
+  if (skipped) toast(`Skipped ${skipped} file${skipped > 1 ? "s" : ""}. Use PNG, JPG, WebP or GIF screenshots.`);
+  render(true);
+}
+
+/* ---------- events ---------- */
+const delArm = {};
+document.addEventListener("click", ev => {
+  const t = ev.target.closest("button, [data-open]");
+  if (!t) return;
+  if (t.dataset.tab){ S.tab = t.dataset.tab; S.openId = null; render(true); window.scrollTo(0,0); return; }
+  if (t.dataset.open){ openItem(t.dataset.open); return; }
+  if (t.hasAttribute("data-back")){ if (S.openId && S.edit[S.openId]) readForm(S.openId); S.openId = null; render(true); return; }
+  if (t.dataset.unpick !== undefined){ const n = +t.dataset.unpick; URL.revokeObjectURL(S.picked[n].url); S.picked.splice(n, 1); render(true); return; }
+  if (t.dataset.dismiss){ S.queue = S.queue.filter(q => q.qid !== t.dataset.dismiss); render(true); return; }
+  if (t.dataset.filter){ S.filter = t.dataset.filter; render(true); return; }
+  if (t.id === "readbtn"){ readQuestions(); return; }
+  if (t.id === "planbtn"){ makePlan(); return; }
+  if (t.dataset.pick){
+    const e = S.edit[S.openId]; if (!e) return;
+    e[t.dataset.pick] = t.dataset.letter;
+    t.parentElement.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b === t)));
+    return;
+  }
+  if (t.dataset.conf){
+    const e = S.edit[S.openId]; if (!e) return;
+    e.confidence = e.confidence === t.dataset.conf ? "" : t.dataset.conf;
+    t.parentElement.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.conf === e.confidence)));
+    return;
+  }
+  if (t.id === "analyzebtn"){ analyze(S.openId); return; }
+  if (t.id === "stopbtn" || t.id === "chatstop"){ ctl?.abort(); return; }
+  if (t.id === "savedraft"){ const e = readForm(S.openId); if (e) Store.save(e); delete S.edit[S.openId]; S.openId = null; toast("Saved. It's waiting under Review."); render(true); return; }
+  if (t.dataset.redo){ const it = find(t.dataset.redo); if (!it) return; const d = clone(it); d.status = "draft"; S.edit[d.id] = d; Store.save(d); render(true); return; }
+  if (t.dataset.del){
+    const id = t.dataset.del;
+    if (!delArm[id]){ delArm[id] = true; t.textContent = "Tap again to delete"; setTimeout(() => { delArm[id] = false; if (t.isConnected) t.textContent = "Delete"; }, 4000); return; }
+    delete delArm[id]; Store.remove(id); delete S.edit[id]; S.openId = null; toast("Deleted."); render(true); return;
+  }
+  if (t.dataset.q){ sendChat(S.openId, t.dataset.q); return; }
+  if (t.id === "chatsend"){ const v = $("#chatin")?.value || ""; sendChat(S.openId, v); return; }
+});
+document.addEventListener("input", ev => {
+  if (ev.target.id === "pastetext") S.pasteText = ev.target.value;
+});
+document.addEventListener("change", ev => {
+  const t = ev.target;
+  if (t.id === "file"){ addFiles([...t.files]); return; }
+  if (t.name === "gm"){ S.groupMode = t.value; render(true); return; }
+  if (t.id === "f-stype" && S.edit[S.openId]){ readForm(S.openId); render(true); return; }
+});
+document.addEventListener("keydown", ev => {
+  if (ev.target.id === "chatin" && ev.key === "Enter" && !ev.shiftKey){ ev.preventDefault(); sendChat(S.openId, ev.target.value); }
+});
+document.addEventListener("dragover", ev => { const d = $("#drop"); if (d && ev.dataTransfer?.types?.includes("Files")){ ev.preventDefault(); d.classList.add("over"); } });
+document.addEventListener("dragleave", ev => { const d = $("#drop"); if (d && !d.contains(ev.relatedTarget)) d.classList.remove("over"); });
+document.addEventListener("drop", ev => { const d = $("#drop"); if (!d) return; ev.preventDefault(); d.classList.remove("over"); addFiles([...(ev.dataTransfer?.files || [])]); });
+document.addEventListener("paste", ev => {
+  if (S.openId || S.tab !== "review") return;
+  const files = [...(ev.clipboardData?.files || [])].filter(f => f.type.startsWith("image/"));
+  if (files.length){ ev.preventDefault(); addFiles(files); }
+});
+
+render(true);
+Store.init();
+initClaude();
+})();
+</script>

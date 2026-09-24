@@ -466,6 +466,33 @@ async function ocrImages(files, onMsg){
   return out.join("\n\n").trim();
 }
 
+// Deterministic LR question-type detection from the stem's wording. Order matters.
+function classifyStem(stem){
+  const s = " " + String(stem || "").toLowerCase().replace(/[’‘]/g, "'").replace(/\s+/g, " ") + " ";
+  if (!s.trim()) return "";
+  const has = re => re.test(s);
+  const flawWords = /flaw|vulnerable to (criticism|the (same )?(objection|criticism))|error in (reasoning|logic)|questionable|faulty|illogical|erroneous reasoning/;
+  if (has(/(similar|parallel|closely (resembles|matches)|most like)/) && has(/reason|argument|pattern|logical features/)) return flawWords.test(s) ? "Parallel Flaw" : "Parallel Reasoning";
+  if (has(/principle|proposition/) && has(/conform|illustrat|in accordance|appl(y|ies|ication) of|in keeping with|consistent with the principle|best exemplif/)) return "Principle (Apply)";
+  if (has(/principle|generalization|proposition/) && has(/justif|support|help|underlie|valid|if (valid|established|correct)|conform|most/)) return "Principle (Identify)";
+  if (has(/\bdisagree|at issue|point of (dis)?agreement.*dispute|committed to disagreeing|dispute/)) return "Point at Issue";
+  if (has(/\b(both )?agree|committed to agreeing|share the (view|belief)/)) return "Point of Agreement";
+  if (has(/resolve|reconcile|explain|account for|discrepancy|paradox|apparent (conflict|inconsistency)|surprising|seemingly/) && !has(/explanation of the (argument|conclusion)/)) return "Resolve/Explain";
+  if (has(/role|function|figures in|purpose (of|served by)|serves (to|as)/) && has(/claim|statement|sentence|observation|assertion|clause|phrase|reference|part of the argument/)) return "Role (Method of Reasoning — part)";
+  if (has(/\bproceeds by|argumentative (technique|strategy)|method of (reasoning|argument|argumentation)|technique of (reasoning|argument)|describes (how|the way)|responds (to .*)?by|does which one of the following|reasoning (by|in) which|strategy/)) return "Method of Reasoning";
+  if (has(/follows? logically|properly (drawn|inferred|made|concluded) if|(conclusion|argument) (is|would be) (properly|logically|validly) (drawn|justified|supported|inferred) if|enables? the (conclusion|argument)|justif(y|ies) the (conclusion|argument)|if assumed/)) return "Sufficient Assumption";
+  if (has(/main (conclusion|point)|overall conclusion|expresses the conclusion|most accurately (expresses|states|summarizes|restates) the (main )?(conclusion|point)|conclusion (drawn|of the argument) (is|in)/)) return "Main Conclusion";
+  if (flawWords.test(s)) return "Flaw";
+  if (has(/useful to (know|determine|establish)|evaluat|most relevant|most helpful (to|in) (know|determin|evaluat|assess)|would be important to know|answer to which/)) return "Evaluate";
+  if (has(/assum|presuppos|depends on|relies on|requires|required by|takes for granted/)) return "Necessary Assumption";
+  if (has(/weaken|undermin|call(s)? into question|cast(s)? (the most )?doubt|counts? against|argue(s)? against|challenge|damag|jeopardiz|objection/)) return "Weaken";
+  if (has(/cannot be true|must be false|could be true except|could (also )?be true|inconsistent with/)) return "Must Be False";
+  if (has(/most strongly supported by|supported by the (information|statements|passage)|most reasonably (concluded|inferred)|most strongly supports? which|best supported|supports which|most (justifiably|reasonably) be (concluded|inferred)|best (completes|fills|concludes)|most logically completes|reasonably be (concluded|inferred)/)) return "Most Strongly Supported";
+  if (has(/must (also )?be true|properly (be )?inferred|properly concluded|follows? from|can be (properly |validly )?(concluded|inferred)|if the (statements|information) above are true.*(which|each)/)) return "Must Be True";
+  if (has(/strengthen|support|bolster|justify|provides? (the )?(most|strongest) (support|reason)|most (helps|help) to (justify|support)/)) return "Strengthen";
+  return "";
+}
+
 /* ---------- prompts ---------- */
 function extractPrompt(pasted, imgCount, ocrText){
   return `You are reading LSAT question material for a student's private study log. ${imgCount ? `You have ${imgCount} screenshot(s), likely from 7Sage or an LSAC practice test.` : ""}${pasted ? `\n\nText the student pasted:\n"""\n${pasted.slice(0, 20000)}\n"""` : ""}${ocrText ? `\n\nText pulled from the student's screenshot(s) by OCR, likely from 7Sage. It may contain small recognition errors and stray interface text (menus, buttons, timers, navigation); ignore that text and fix obvious OCR mistakes. Answer-choice letters are often garbled (e.g. "(ce)", "[-]", "(®)"); the five choices always appear in order A through E. OCR cannot see colors or highlights, so leave yourAnswer and correctAnswer blank unless the text explicitly states them:\n"""\n${ocrText.slice(0, 30000)}\n"""` : ""}
@@ -476,10 +503,9 @@ Extract exactly ONE question. Reply with only this JSON object:
  "test": "practice test id if visible, like \\"PT 141\\", else \\"\\"",
  "section": "section if visible, like \\"S2\\", else \\"\\"",
  "number": "question number if visible, else \\"\\"",
- "typeLabel": "a question-type label ONLY if the material itself shows one (7Sage sometimes tags questions, e.g. \"Flaw\"), else \"\". Do not classify the question yourself.",
  "passage": "the Reading Comprehension passage text if shown, else \\"\\"",
  "stimulus": "the Logical Reasoning stimulus, verbatim (\\"\\" for RC)",
- "stem": "the question stem, verbatim",
+ "stem": "the question stem, verbatim: the question sentence that sits directly before answer choice (A), such as \"The argument is most vulnerable to criticism on the grounds that it\". Never take it from the stimulus or from any other question visible on screen.",
  "choices": {"A": "...", "B": "...", "C": "...", "D": "...", "E": "..."},
  "yourAnswer": "the letter the STUDENT chose, only if the material clearly marks it (e.g. marked as their answer, red, crossed out as incorrect), else \\"\\"",
  "correctAnswer": "the letter marked correct, only if clearly marked (green, check mark, 'correct answer', answer key), else \\"\\""}
@@ -499,7 +525,7 @@ function analyzePrompt(i){
 3. Break down the stimulus and every answer choice in plain English: short sentences, everyday words, and define any LSAT term you use.
 
 Section: ${i.sectionType || "LR"}
-${i.qtype && !i.qtypeAuto ? `The student labeled this a ${i.qtype} question. If the stem clearly shows a different type, use the correct type and say so in stemPlain.` : `Question type: not confirmed${i.qtype ? ` (a label read from the screenshot says "${i.qtype}", which may be wrong)` : ""}. Decide the type yourself from the exact wording of the question stem.`}
+${i.qtype ? `Question type: ${i.qtype}. This was ${i.qtypeFrom === "user" ? "chosen by the student" : "determined from the exact wording of the question stem"}; it is correct. Analyze the question as a ${i.qtype} question and return "${i.qtype}" as questionType. Your stemPlain must describe what a ${i.qtype} question asks for.` : `Question type: unknown. Decide it from the exact wording of the question stem.
 
 How to tell the type from the stem:
 - Flaw: "vulnerable to criticism", "flawed", "error in reasoning", "questionable technique". You DESCRIBE a mistake the argument makes.
@@ -509,7 +535,7 @@ How to tell the type from the stem:
 - Must Be True: "must be true", "properly inferred". Most Strongly Supported: "most strongly supported", "most reasonably concluded".
 - Main Conclusion: "main conclusion". Role: "role played by the claim". Method of Reasoning: "proceeds by", "argumentative technique".
 - Parallel Reasoning / Parallel Flaw: "most similar in its reasoning" (Parallel Flaw if it says flawed). Principle: "principle ... helps justify" (Identify) or "conforms to the principle" (Apply).
-- Point at Issue: "disagree about". Point of Agreement: "agree". Resolve/Explain: "resolve the discrepancy", "explain".
+- Point at Issue: "disagree about". Point of Agreement: "agree". Resolve/Explain: "resolve the discrepancy", "explain".`}
 
 ${questionBlock(i)}
 
@@ -587,11 +613,12 @@ async function readQuestions(){
         id: uid(), kind:"miss", status:"draft", createdAt: Date.now(),
         test: String(r.test || "").trim(), section: String(r.section || "").trim(), number: String(r.number || "").trim(),
         sectionType: r.sectionType === "RC" ? "RC" : "LR",
-        qtype: ALL_TYPES.includes(r.typeLabel) ? r.typeLabel : "", qtypeAuto: true, fromOcr: !!ocrText,
+        qtype: "", qtypeFrom: "", fromOcr: !!ocrText,
         passage: String(r.passage || ""), stimulus: String(r.stimulus || ""), stem: String(r.stem || ""), choices,
         yourAnswer: L(r.yourAnswer), correctAnswer: L(r.correctAnswer),
         reasoning:"", confidence:"", timePressure:false, analysis:null, chat:[]
       };
+      detectType(item);
       S.shots[item.id] = entry.job.imgs.map(f => URL.createObjectURL(f));
       Store.save(item);
       S.queue = S.queue.filter(x => x.qid !== entry.qid);
@@ -605,15 +632,25 @@ async function readQuestions(){
   }
 }
 
+// Unless the student picked a type, the stem's wording decides it.
+function detectType(e){
+  if (e.qtypeFrom === "user") return;
+  const d = e.sectionType === "RC" ? "" : classifyStem(e.stem);
+  if (d){ e.qtype = d; e.qtypeFrom = "stem"; }
+  else if (e.qtypeFrom === "stem" || e.qtypeAuto){ e.qtype = ""; e.qtypeFrom = ""; }
+  delete e.qtypeAuto;
+}
+
 function readForm(id){
   const e = S.edit[id]; if (!e) return null;
   const v = sel => { const el = $(sel); return el ? el.value : undefined; };
   const set = (k, x) => { if (x !== undefined) e[k] = x; };
   set("test", v("#f-test")); set("section", v("#f-section")); set("number", v("#f-number"));
-  const qt = v("#f-qtype");
-  if (qt) { e.qtype = qt; e.qtypeAuto = false; } else if (qt === "" && !e.qtypeAuto) e.qtype = "";
   set("sectionType", v("#f-stype"));
   set("reasoning", v("#f-reasoning")); set("stem", v("#f-stem")); set("stimulus", v("#f-stim")); set("passage", v("#f-passage"));
+  const qt = v("#f-qtype");
+  if (qt !== undefined && qt !== (e.qtype || "")){ e.qtype = qt; e.qtypeFrom = qt ? "user" : ""; }
+  detectType(e);
   LETTERS.forEach(k => { const x = v("#f-ch-" + k); if (x !== undefined) e.choices[k] = x; });
   const tp = $("#f-time"); if (tp) e.timePressure = tp.checked;
   return e;
@@ -635,7 +672,7 @@ async function analyze(id){
     if (!a) throw { code:"_shape" };
     const done = clone(e);
     done.analysis = a;
-    if ((done.qtypeAuto || !done.qtype) && ALL_TYPES.includes(a.questionType)){ done.qtype = a.questionType; done.qtypeAuto = false; }
+    if (!done.qtype && ALL_TYPES.includes(a.questionType)) done.qtype = a.questionType;
     done.status = "reviewed";
     done.reviewedAt = Date.now();
     Store.save(done);
@@ -856,7 +893,7 @@ function questionView(i, withHL){
 }
 
 function viewEditor(i){
-  if (!S.edit[i.id]) S.edit[i.id] = clone(i);
+  if (!S.edit[i.id]){ S.edit[i.id] = clone(i); detectType(S.edit[i.id]); }
   const e = S.edit[i.id];
   const busy = S.busy[i.id] === "analyzing";
   const shots = S.shots[i.id] || [];
@@ -874,7 +911,7 @@ function viewEditor(i){
     </div>
     <div class="grid2">
       <label class="field"><span>Section type</span><select id="f-stype"><option value="LR" ${e.sectionType !== "RC" ? "selected" : ""}>Logical Reasoning</option><option value="RC" ${e.sectionType === "RC" ? "selected" : ""}>Reading Comprehension</option></select></label>
-      <label class="field" style="grid-column:span 2"><span>Question type</span><select id="f-qtype"><option value="">Let the tutor decide from the question</option><optgroup label="Logical Reasoning">${opts(LR_TYPES, e.qtypeAuto ? "" : e.qtype)}</optgroup><optgroup label="Reading Comprehension">${opts(RC_TYPES, e.qtypeAuto ? "" : e.qtype)}</optgroup></select></label>
+      <label class="field" style="grid-column:span 2"><span>Question type</span><select id="f-qtype"><option value="">Let the tutor decide from the question</option><optgroup label="Logical Reasoning">${opts(LR_TYPES, e.qtype)}</optgroup><optgroup label="Reading Comprehension">${opts(RC_TYPES, e.qtype)}</optgroup></select>${e.qtypeFrom === "stem" ? `<span class="muted" style="font-size:13px">Detected from the question's wording. Change it if it's wrong.</span>` : ""}</label>
     </div>
     ${shots.length || e.fromOcr ? `<p class="lede">Check that the text below matches your screenshot${e.fromOcr ? ". It was read from the image, so a word can come out wrong" : ""}. If anything's off, open <strong>Fix the text</strong>.</p>` : ""}
     ${unclear ? `<div class="notice">Some words couldn't be read (marked [?]). Fix them under Fix the text so the tutor reads the question correctly.</div>` : ""}
@@ -920,8 +957,14 @@ function viewBreakdown(i){
   const a = i.analysis, p = a.plain || {}, d = a.diagnosis || {};
   const ch = LETTERS.map(k => (a.choices || []).find(c => L(c.letter) === k) || { letter:k, plain:"", verdict: k === i.correctAnswer ? "correct" : "wrong", why:"" });
   const busy = S.busy[i.id] === "analyzing";
+  const detected = i.example || i.sectionType === "RC" || i.qtypeFrom === "user" ? "" : classifyStem(i.stem);
+  const relabel = detected && detected !== i.qtype ? detected : "";
   return `
   <div class="crumb"><button class="btn ghost" data-back>← Back</button></div>
+  ${relabel ? `<div class="notice" style="display:flex;flex-direction:column;gap:10px">
+    <span>The question asks "${esc(i.stem)}". That wording makes it a <strong>${esc(relabel)}</strong> question, but this breakdown treated it as ${esc(i.qtype || "another type")}.</span>
+    <div class="row"><button class="btn primary" data-relabel="${esc(i.id)}" ${S.sample ? "" : "disabled"}>Redo as ${esc(relabel)}</button></div>
+  </div>` : ""}
   <section class="qhead">
     <div class="row"><span class="mono muted">${esc(codeFor(i))}</span>${i.qtype ? `<span class="chip type">${esc(i.qtype)}</span>` : ""}${i.example ? `<span class="chip">Example. Not a real LSAT question.</span>` : ""}</div>
     <h2>${esc(d.mistake || "Breakdown")}</h2>
@@ -1062,6 +1105,12 @@ document.addEventListener("click", ev => {
   if (t.id === "analyzebtn"){ analyze(S.openId); return; }
   if (t.id === "stopbtn" || t.id === "chatstop"){ ctl?.abort(); return; }
   if (t.id === "savedraft"){ const e = readForm(S.openId); if (e) Store.save(e); delete S.edit[S.openId]; S.openId = null; toast("Saved. It's waiting under Review."); render(true); return; }
+  if (t.dataset.relabel){
+    const it = find(t.dataset.relabel); if (!it) return;
+    const d = clone(it); d.status = "draft"; d.qtype = classifyStem(d.stem); d.qtypeFrom = "stem";
+    S.edit[d.id] = d; Store.save(d); render(true); window.scrollTo(0, 0);
+    analyze(d.id); return;
+  }
   if (t.dataset.redo){ const it = find(t.dataset.redo); if (!it) return; const d = clone(it); d.status = "draft"; S.edit[d.id] = d; Store.save(d); render(true); return; }
   if (t.dataset.del){
     const id = t.dataset.del;
